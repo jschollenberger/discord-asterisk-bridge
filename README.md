@@ -3,6 +3,8 @@
 [![CI](https://github.com/jschollenberger/discord-asterisk-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/jschollenberger/discord-asterisk-bridge/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
+<!-- Replace jschollenberger/discord-asterisk-bridge above with your GitHub path once the repo is pushed. -->
+
 Streams an AllStar/HamVOIP repeater network into Discord voice channels over
 direct SIP/RTP audio — no Icecast, no FFmpeg. 20ms audio frames with minimal
 buffering, versus the ~30s buffer delay a typical Icecast relay carries.
@@ -21,9 +23,13 @@ other clubs can run it against their own AllStar nodes.
   up the repeater by talking normally in the voice channel. Gated by a
   per-repeater lock (only one speaker at a time, matching real repeater
   behavior), a hard maximum transmission length, and an admin kill switch.
-- **Live connection health** — the bot's control panel and `/status` show
-  real SIP connection state (connected/reconnecting/etc), not just "is
-  Discord playing something."
+- **Always-on monitoring** — every configured repeater holds a persistent
+  SIP connection from startup, independent of Discord voice. Transmissions
+  are detected, recorded, and logged on *all* repeaters full time, not just
+  whichever one is currently audible.
+- **Live connection health** — the control panel, `/status`, and the
+  terminal dashboard show real SIP connection state per repeater
+  (connected/reconnecting/etc), not just "is Discord playing something."
 - **Node activity feed** — polls AllStar link state and posts link/unlink
   events to a Discord channel, batched and truncation-safe for busy hub
   nodes. Also posts local-PTT activity (who's transmitting, for how long)
@@ -36,25 +42,35 @@ other clubs can run it against their own AllStar nodes.
   commands, without giving raw DTMF access.
 - **Ham radio utilities** — `/qrz` (callsign lookup), `/solar` (HF
   propagation/band conditions).
-- **A live terminal dashboard** (via `rich`) showing per-guild streaming
-  status, SIP connection state, and recent log activity.
+- **Per-repeater Discord channels** — each repeater can have its own voice
+  channel and its own activity channel, and (with a second bot token) can
+  stream simultaneously rather than one-at-a-time.
+- **A live terminal dashboard** (via `rich`) with a row per repeater: SIP
+  state, whether it's live in a voice channel or monitoring only, and
+  recent log activity.
 
 ## Requirements
 
-- Python 3.10+ (developed and tested against 3.12)
+- Python 3.12+ (CI covers 3.12 and 3.13 on Linux, and 3.13 on Windows —
+  which is what the reference deployment runs)
 - An AllStar/HamVOIP node (or two) with AMI and SIP access
 - A Discord bot application ([discord.com/developers/applications](https://discord.com/developers/applications))
   with the **Message Content** privileged intent enabled (needed for prefix
   commands), and voice permissions granted
 - Optional: a [QRZ.com](https://www.qrz.com/) XML data subscription, for `/qrz`
-- Optional, only if you want two-way TX: the `discord-ext-voice-recv` package
-  (see [Known issues](#known-issues) — it's labeled "Experimental" upstream)
+
+All Python dependencies install from `requirements.txt`. Two of them —
+`rfcvoip` and `discord-ext-voice-recv` — are pinned to exact versions
+because this project patches and depends on their internals; see the
+comments in that file before bumping either.
 
 ## Installation
 
 ```bash
-git clone <this repo>
-cd <this repo>
+git clone https://github.com/jschollenberger/discord-asterisk-bridge.git
+cd discord-asterisk-bridge
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp config.example.yaml config.yaml
 ```
@@ -75,6 +91,12 @@ Never commit it.
 chmod 600 config.yaml
 python allstar_discord_bot.py
 ```
+
+For anything long-running, run it under a process supervisor
+(systemd, [NSSM](https://nssm.cc/) on Windows) so it survives logout and
+restarts on failure. Note the terminal dashboard only renders when run
+interactively — as a service, the log file is your window in. Set
+`bot.log_file_level: DEBUG` temporarily when diagnosing something.
 
 ## Asterisk-side setup
 
@@ -122,9 +144,21 @@ asterisk -rx "sip reload"
 asterisk -rx "dialplan reload"
 ```
 
+**If you plan to use TX**, note that `P` (Phone Control mode) also defines
+how the transmitter is keyed: audio sent into the call is *discarded* until
+PTT is asserted in-band with DTMF `*99`, and `#` unkeys. The bot sends
+these automatically when a TX lock is acquired and released, so operators
+just talk — but a dialplan that hands the call to a bare `rpt(NODE)` will
+answer, accept audio, and transmit nothing. Do **not** substitute `D`
+("dumb phone mode") to avoid the DTMF: it keys the transmitter continuously
+for the life of the call, and this bot holds its monitor calls open 24/7.
+
 ## Commands
 
-Run `/help` in Discord for the full, current list. Highlights:
+Run `/help` in Discord for the full, current list. Commands that act on a
+specific repeater take an optional `repeater` option; omit it and the bot
+infers the target from the channel you ran it in (see
+[Architecture notes](#architecture-notes)). Highlights:
 
 | Command | Description |
 |---|---|
@@ -158,25 +192,42 @@ things worth knowing going in:
   verified defaults for *your* node — AllStar function tables are
   per-node config, not a fixed standard. Check your own `rpt.conf`
   `[functionsNNNNN]` stanza before trusting any of them.
+- **`repeaters[].enabled`** (default `true`) takes a repeater fully offline
+  — no SIP monitor, no recording, no activity posts, no health alerts.
+  Useful when a node is down for maintenance, or staged in config before
+  its Asterisk side is ready.
+- **`bot.log_file_level`** — `INFO` for normal operation, `DEBUG` when
+  chasing something. Steady-state SIP heartbeats are aggregated into one
+  summary line per 10 minutes even at `DEBUG`, so the log stays readable.
 
 ## Known issues
 
-- **Intermittent SIP registration failures on Windows.** The underlying SIP
-  library (`rfcvoip`) occasionally hits `OSError: [WinError 10038] An
-  operation was attempted on something that is not a socket` during
-  registration or call setup. It's intermittent — most sessions connect
-  cleanly, some hit a retry storm that usually (not always) recovers via
-  the built-in exponential backoff. This appears to be a Windows-specific
-  socket-teardown timing issue in the library, not something fixable from
-  this bot's code; running on Linux (native or WSL2) is the most reliable
-  way to sidestep it entirely if you hit this regularly.
-- **`discord-ext-voice-recv` (TX) is labeled "Experimental" upstream.** A
-  single corrupted Opus packet from *any* speaker in the channel can crash
-  its internal packet router, which would otherwise silently disable TX for
-  the rest of the session. This bot detects that and automatically
-  reattaches (capped at 5 consecutive recovery attempts), but the
-  underlying fragility is in the library, not something this bot's code can
-  fully fix.
+- **`discord-ext-voice-recv` (TX) is labeled "Experimental" upstream.** Its
+  packet router has no per-packet error handling: a single undecodable Opus
+  packet — routine during Discord's key rotations — raises out of the
+  decode call and kills the entire receive thread, silently disabling TX
+  for the rest of the session. This bot patches `PacketDecoder.pop_data` at
+  startup to isolate failures per packet (drop it, reset the decoder,
+  resync), with the reattach watchdog kept as a backstop. The fragility is
+  upstream; this is a workaround, which is why the package is pinned to an
+  exact version.
+- **`rfcvoip` reuses SIP identifiers across process restarts.** It derives
+  Call-IDs from a counter that starts at 1 in every process, so a restart
+  replays the same identifiers — which collides with any dialog Asterisk is
+  still holding from an unclean shutdown, and gets the new call remote-BYE'd
+  about a second after it answers. This bot seeds the counters randomly per
+  connection to sidestep it. Setting `rtptimeout=60` in your `sip.conf` is a
+  worthwhile belt-and-braces measure so stale dialogs self-clear.
+- **`audioop` is deprecated** and was removed from the Python standard
+  library in 3.13; the `audioop-lts` backport (pulled in automatically on
+  3.13) covers it for now, but this is a dependency on a community
+  maintained shim rather than the stdlib.
+- **PyNaCl is held at a version with a known advisory.** `discord.py[voice]`
+  constrains it to `PyNaCl<1.6`, which excludes the release that fixes
+  PYSEC-2026-3002 — the upgrade is blocked upstream and can't be resolved
+  here. CI's dependency audit suppresses that specific ID (so new advisories
+  still surface) and it should be revisited whenever discord.py relaxes the
+  cap.
 - **`rfcvoip` is GPLv3-licensed.** This project is itself GPLv3 (see
   [License](#license)), so the dependency's terms are fully compatible
   however you install or redistribute it.
@@ -198,7 +249,7 @@ for, below.
 
 Repeaters can each be bound to their own Discord voice channel — and
 optionally their own Discord application — via an optional `discord:` block
-per repeater in `config.yaml` (see `config_example.yaml` for full comments):
+per repeater in `config.yaml` (see `config.example.yaml` for full comments):
 
 - **No `discord:` blocks** — classic setup: one bot, one shared channel,
   `/vhf` / `/uhf` switch the single live stream. Existing configs work
@@ -236,10 +287,28 @@ its token and channel on the repeater's `discord:` block.
 - `config.py` / `config.yaml` — typed config loading; see
   `config.example.yaml` for the full reference.
 
-Each repeater gets its own direct SIP connection per active Discord guild.
-Node link/unlink detection is via AMI polling (default every 15s), not a
+**Monitors vs. playback.** Each repeater gets exactly one persistent SIP
+connection for the life of the process — not one per guild, and not one per
+listener. Discord playback is a non-owning *view* onto that monitor, so
+joining, leaving, or switching repeaters tears down only the view. This is
+why activity logging and recording keep running on a repeater nobody is
+currently listening to.
+
+Because every monitor runs concurrently, each one binds its own local SIP
+port (auto-assigned 5060, 5062, … unless pinned in config) and its own RTP
+port range. Two clients sharing a local port is an immediate bind failure.
+
+**Node link/unlink detection is AMI polling** (default every 15s), not a
 live event stream — real-time enough for "someone linked up," not
 millisecond-precise.
+
+**TX targeting.** Commands that act on a repeater (`/link`, `/unlink`,
+`/unlink-all`, `/monitor-node`, `/repeater-cmd`, `/tx-kill`) resolve their
+target in three tiers: an explicit `repeater` option wins; otherwise the
+invoking channel is matched against each repeater's voice and activity
+channels (including threads under them); otherwise it falls back to the
+guild's active repeater. Every reply states which repeater was chosen and
+why, so a command can't quietly hit the wrong node.
 
 ## Development
 
