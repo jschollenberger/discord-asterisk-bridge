@@ -1,0 +1,77 @@
+# Test fixture config — fake credentials only, mirrors production structure.
+bot:
+  token: "TEST_PRIMARY_TOKEN"
+  prefix: "!"
+  log_file: "test_run.log"
+  controller_role: ""
+  auto_join_channel_id: 111000111
+  guild_id: 999000999
+  sip_debug_verbose: false
+
+club:
+  name: "TESTCLUB"
+  callsign: "T3ST"
+  website: ""
+  trustee: ""
+  location: { name: "Test Site", address: "", maps_url: "" }
+
+repeaters:
+  - id: "vhf"
+    display_name: "VHF"
+    frequency_mhz: 146.745
+    offset_mhz: -0.600
+    pl_hz: 146.2
+    allstar_node: "50420"
+    ami: { host: "127.0.0.1", port: 5038, username: "test", password: "test" }
+    sip_audio:
+      host: "127.0.0.1"
+      port: 5060
+      username: "test-vhf"
+      password: "test"
+      extension: "50420"
+      local_ip: "127.0.0.1"
+  - id: "uhf"
+    display_name: "UHF"
+    frequency_mhz: 448.775
+    offset_mhz: -5.000
+    pl_hz: 146.2
+    allstar_node: "53209"
+    ami: { host: "127.0.0.2", port: 5038, username: "test", password: "test" }
+    sip_audio:
+      host: "127.0.0.2"
+      port: 5060
+      username: "test-uhf"
+      password: "test"
+      extension: "53209"
+      local_ip: "127.0.0.1"
+
+activity:
+  channel_id: 222000222
+  poll_interval_seconds: 15
+  vad_rms_threshold: 400
+  vad_hangover_seconds: 1.5
+  record_transmissions: false
+  max_recording_seconds: 300
+
+sip_health: { alert_after_seconds: 60 }
+
+repeater_commands:
+  - id: "time"
+    label: "Announce Time"
+    description: "test"
+    command: "rpt fun {node} *81"
+    repeaters: ["vhf", "uhf"]
+  - id: "weather"
+    label: "Weather"
+    description: "uhf only"
+    command: "rpt fun {node} *85"
+    repeaters: ["uhf"]
+
+qrz: null
+asterisk: { enabled: true, operator_role: "" }
+tx:
+  enabled: false
+  max_transmission_seconds: 180
+  release_hangover_seconds: 1.0
+  verify_with_qrz_on_startup: false
+tx_operators: []

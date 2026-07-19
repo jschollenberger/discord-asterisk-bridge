@@ -1,0 +1,28 @@
+# Live credentials — never commit. Ship config_example.yaml instead.
+# Leading slash anchors this to the repo ROOT: an unanchored "config.yaml"
+# also matches at any depth and would silently exclude the test fixture
+# (tests/fixtures/config.yaml), breaking CI with no obvious cause.
+/config.yaml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Test artifacts
+tests/fixtures/test_run.log
+.pytest_cache/
+.ruff_cache/
+
+# Logs and runtime artifacts
+*.log
+logs/
+*.wav
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

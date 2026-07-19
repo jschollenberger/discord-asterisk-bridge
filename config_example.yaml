@@ -1,0 +1,407 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Repeater Bot — Example Configuration  v7.1
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy this file to config.yaml and fill in your own values.
+# config.yaml is gitignored — never commit it, it will contain live credentials.
+#   cp config.example.yaml config.yaml
+#   chmod 600 config.yaml
+
+bot:
+  token: "YOUR_DISCORD_BOT_TOKEN"
+  prefix: "!"
+  log_file: "bot.log"
+
+  # File-log verbosity: "INFO" (recommended for normal operation) or
+  # "DEBUG" (everything, including per-event SIP tracing — use when
+  # actively debugging). Console output is always INFO+ regardless.
+  # Steady-state SIP heartbeats (OPTIONS/200 OK/register refreshes) are
+  # aggregated into one summary line per 10 minutes even at DEBUG.
+  log_file_level: "INFO"
+
+  # Discord role allowed to control streaming (join/leave/switch/etc).
+  # Leave blank to allow everyone.
+  controller_role: ""
+
+  # Voice/Stage channel to join on startup. 0 = disabled (join manually with /join).
+  auto_join_channel_id: 0
+
+  # Primary guild (server) ID — enables instant slash command sync on startup
+  # instead of waiting up to an hour for Discord's global command propagation.
+  # Right-click your server icon → Copy Server ID (requires Developer Mode,
+  # enabled under Discord Settings → Advanced).
+  guild_id: 0
+
+  # SIP internals logging. False (default) = short, useful summaries only —
+  # response codes, register-cycle events, failure reasons — with the full
+  # multi-line raw protocol dumps stripped out. Those dumps fire on every
+  # REGISTER refresh (~every 120s for as long as the call is up) and are
+  # the single biggest source of log growth once a connection is stable.
+  # Flip to true only when actively chasing a SIP issue; it gets loud fast
+  # over a long session.
+  sip_debug_verbose: false
+
+
+# ─── Club Identity ────────────────────────────────────────────────────────────
+
+club:
+  name: "Example Radio Club"
+  callsign: "YOUR_CALLSIGN"
+  website: ""
+  trustee: ""
+
+  location:
+    name: "Example Clubhouse"
+    address: "City, ST"
+    maps_url: ""
+
+
+# ─── Repeaters ────────────────────────────────────────────────────────────────
+# Each repeater's `id` doubles as its stream/preset selector: /vhf and /uhf
+# switch the active repeater directly (no separate preset config). Each has
+# its own AllStar node number, AMI credentials, and SIP audio settings.
+# /link and /unlink operate via the AMI of whichever repeater is active.
+#
+# You aren't limited to exactly "vhf"/"uhf" — the ids just need to be unique
+# and match what you reference elsewhere (repeater_commands, etc). Delete the
+# second entry entirely if you only have one repeater.
+
+repeaters:
+  - id: "vhf"
+    display_name: "VHF"
+    # ── Optional per-repeater Discord binding ─────────────────────────────
+    # The intended end-state: each repeater gets its OWN voice channel and
+    # its OWN activity text channel, so #vhf / #vhf-activity carry only VHF
+    # and #uhf / #uhf-activity carry only UHF. Every field falls back to
+    # the shared/global setting, so all of these arrangements work:
+    #
+    #   Nothing set (block omitted)      → classic combined setup: one bot,
+    #     one shared voice channel (bot.auto_join_channel_id), one shared
+    #     activity channel (activity.channel_id), /vhf & /uhf switch the
+    #     single live stream. Existing configs run unchanged. Putting the
+    #     SAME channel ids into both repeaters' blocks is equivalent.
+    #
+    #   channel_id per repeater          → per-repeater voice channels on
+    #     the one primary bot. Switching presets moves the bot to the
+    #     target repeater's channel. Still one live stream at a time —
+    #     Discord allows one voice connection per guild per application.
+    #
+    #   activity_channel_id per repeater → this repeater's transmissions,
+    #     node link/unlink events, SIP health alerts, and TX events post to
+    #     its own text channel instead of the global activity channel.
+    #     Repeaters without it keep posting to activity.channel_id.
+    #     Independent of the voice/token settings — you can split activity
+    #     channels while keeping the classic single voice stream.
+    #
+    #   token per repeater               → this repeater runs on its own
+    #     dedicated Discord application (create a second app/bot in the
+    #     Developer Portal, invite it with Connect/Speak permissions) as a
+    #     headless "satellite" inside the same process. It joins its
+    #     channel_id at startup and streams simultaneously with the primary
+    #     — VHF and UHF live at the same time. Commands, control panel, and
+    #     TX stay on the primary bot; activity posting for this repeater
+    #     also stays with the primary (set activity_channel_id as desired).
+    # discord:
+    #   channel_id: 0            # voice channel for this repeater
+    #   activity_channel_id: 0   # text channel for this repeater's activity
+    #   token: ""                # dedicated app token (satellite mode)
+    frequency_mhz: 146.700       # your repeater's output (TX) frequency
+    offset_mhz: -0.600            # -0.600 or +0.600 for 2m, -5.000 for 70cm, etc.
+    pl_hz: 100.0                  # your CTCSS/PL tone
+    allstar_node: "000000"        # your AllStar node number
+    # Set false to take this repeater fully offline: no SIP monitor,
+    # no recording, no activity posts, no health alerts, and it can't
+    # be played to a voice channel. Useful when a repeater is down for
+    # maintenance, or staged in config before its Asterisk side is
+    # ready. Defaults to true when omitted.
+    enabled: true
+                                    # guild is actively streaming — set true
+                                    # for whichever repeater should show as
+                                    # "live" by default
+    ami:
+      host: "10.0.0.10"           # HamVOIP/Asterisk box's LAN IP
+      port: 5038
+      username: "admin"
+      password: "CHANGE_ME"       # AMI password from your HamVOIP box's
+                                    # manager.conf, not your login password
+
+    # SIP audio: the sole audio path (direct RTP, no Icecast/FFmpeg). See
+    # repeater_audio.py's module docstring for the full Asterisk-side
+    # sip_custom.conf / extensions_custom.conf setup this requires —
+    # including a specific dialplan option (`rpt(NODE,P)`) that a bare
+    # `rpt(NODE)` will NOT work correctly with for a non-AllStar-node SIP
+    # client like this bot.
+    sip_audio:
+      host: "10.0.0.10"
+      port: 5060
+      username: "discord-vhf"     # matches the [section] name you choose in
+                                    # sip_custom.conf
+      password: "CHANGE_ME"        # set this, then: asterisk -rx "sip reload"
+      extension: "000000"          # extension in your dialplan context —
+                                    # typically the same as allstar_node above
+      local_ip: ""                 # auto-detected from routing table if blank
+      # LOCAL UDP port this client binds for SIP signaling. Leave 0/omitted
+      # to auto-assign a unique port per repeater (5060, 5062, ...). Every
+      # repeater's always-on monitor runs concurrently, so they can NOT
+      # share a local port — set explicitly only if a firewall rule needs a
+      # fixed value, and keep it unique across repeaters.
+      local_sip_port: 0
+
+  - id: "uhf"
+    display_name: "UHF"
+    frequency_mhz: 448.700
+    offset_mhz: -5.000
+    pl_hz: 100.0
+    allstar_node: "000001"
+    # Set false to take this repeater fully offline: no SIP monitor,
+    # no recording, no activity posts, no health alerts, and it can't
+    # be played to a voice channel. Useful when a repeater is down for
+    # maintenance, or staged in config before its Asterisk side is
+    # ready. Defaults to true when omitted.
+    enabled: true
+    ami:
+      host: "10.0.0.11"
+      port: 5038
+      username: "admin"
+      password: "CHANGE_ME"
+    sip_audio:
+      host: "10.0.0.11"
+      port: 5060
+      username: "discord-uhf"
+      password: "CHANGE_ME"
+      extension: "000001"
+      local_ip: ""
+      local_sip_port: 0            # see the VHF block above; must be unique per repeater
+
+
+# ─── Node Activity Feed ───────────────────────────────────────────────────────
+# Polls AllStar nodes and posts link/unlink events to the activity channel.
+# Also posts local-PTT activity (see vad_rms_threshold below) and SIP health
+# alerts (see sip_health: further down) to this same channel.
+
+activity:
+  channel_id: 0   # Discord channel ID to post activity to; right-click a
+                   # channel → Copy Channel ID (Developer Mode required)
+  poll_interval_seconds: 15
+
+  # Energy threshold (audioop.rms() on 16-bit PCM) for detecting local
+  # transmissions on the SIP audio feed, so the activity log can show
+  # "someone actually keyed up" — not just AllStar node link/unlink, which
+  # AMI polling has no visibility into. This is SITE-DEPENDENT: it depends on
+  # your receiver's audio output level and noise floor. Tune it by watching
+  # the log at DEBUG level while keying up on the repeater, and adjusting
+  # until real transmissions are detected without false-triggering on noise.
+  # There's no universally-correct default — start here and adjust.
+  vad_rms_threshold: 400
+
+  # How long a pause (word gap, breath, mid-sentence pause) is tolerated
+  # before a transmission is considered "over" — both for the activity-log
+  # duration and for driving Discord's speaking indicator. Too short and a
+  # single continuous transmission gets split into several separate logged
+  # fragments every time the operator pauses to breathe — real speech pauses
+  # regularly exceed short thresholds like 300ms. If you see one
+  # transmission logged as several short ones back-to-back, raise this
+  # further; if transmissions feel slow to end after someone releases PTT,
+  # lower it.
+  vad_hangover_seconds: 1.5
+
+  # Attach a WAV recording of each completed transmission to its
+  # activity-channel message, alongside the existing text summary. Off by
+  # default — think about storage growth and privacy before turning this
+  # on, not just whether it's useful. 8kHz mono 16-bit WAV runs about
+  # 16KB/second, so even a multi-minute transmission stays a small file.
+  record_transmissions: false
+
+  # Hard cap on recording length, independent of how long the actual
+  # transmission ran — protects against a stuck-open carrier producing an
+  # unbounded WAV file. The reported duration in the activity message is
+  # never affected by this cap, only the attached recording is.
+  max_recording_seconds: 300
+
+
+# ─── SIP Audio Health Alerts ──────────────────────────────────────────────────
+# If a guild's direct SIP/RTP connection to a repeater (see repeater_audio.py)
+# gets stuck RECONNECTING for longer than this, post a warning to the
+# activity channel above — so a dropped Asterisk-side connection doesn't go
+# unnoticed until someone happens to check /status.
+
+sip_health:
+  alert_after_seconds: 60
+
+
+# ─── Repeater Commands ─────────────────────────────────────────────────────────
+# Named Asterisk/HamVOIP actions exposed as a single Discord slash command,
+# /repeater-cmd <name> (with autocomplete), gated the same way /link and
+# /unlink are (operator_role below). `command` is run via the AMI "Command"
+# action against the currently ACTIVE repeater, with {node} substituted for
+# its allstar_node — e.g. "rpt fun {node} *81" becomes "rpt fun 000000 *81".
+# Note the leading "*" before the function code — that's the DTMF function
+# character (funcchar) app_rpt expects before a function code, same as if
+# it were actually dialed on a radio; without the asterisk it will not work.
+#
+# IMPORTANT — these are EXAMPLES, not verified defaults for your node. DTMF
+# function codes are defined per-node in YOUR OWN rpt.conf's
+# [functionsNNNNN] stanza, and a code that does one thing on one node isn't
+# guaranteed to do the same thing — or exist at all — on another. Check your
+# own node's function table before enabling any of these, and update the
+# `command:` values to match. The codes below (time announcement, station
+# ID, full status) are common HamVOIP defaults and a reasonable starting
+# point, but confirm against your own config first.
+#
+# `repeaters:` scopes an entry to specific repeater id(s) for exactly this
+# reason — once you've confirmed a code behaves the same way on every
+# repeater listed, you can list them all; otherwise scope it to just the
+# one(s) you've verified.
+#
+# Deliberately NOT included as examples: raw PTT-key commands (key the
+# transmitter open with no automatic timeout) and system reboot/halt
+# commands — those are easy to get wrong in a way that takes a node offline
+# or leaves a carrier stuck open, and are better left for a human at the
+# console rather than a Discord command.
+
+repeater_commands:
+  - id: "time"
+    label: "Announce Time (12hr)"
+    description: "Announce the current time on the repeater (12-hour format)"
+    command: "rpt fun {node} *81"
+    repeaters: ["vhf", "uhf"]
+
+  - id: "time24"
+    label: "Announce Time (24hr)"
+    description: "Announce the current time on the repeater (24-hour format)"
+    command: "rpt fun {node} *82"
+    repeaters: ["vhf", "uhf"]
+
+  - id: "id"
+    label: "Station ID"
+    description: "Force a local station identification"
+    command: "rpt fun {node} *80"
+    repeaters: ["vhf", "uhf"]
+
+  - id: "full-status"
+    label: "Full System Status"
+    description: "Play the full linked-system status announcement"
+    command: "rpt fun {node} *75"
+    repeaters: ["vhf", "uhf"]
+
+  # A few more common HamVOIP defaults, left commented out — verify against
+  # your own rpt.conf, then uncomment and adjust:
+  #
+  # - id: "say-local-ip"
+  #   label: "Say Local IP"
+  #   description: "Announce the node's local IP address"
+  #   command: "rpt fun {node} *A1"
+  #   repeaters: ["vhf", "uhf"]
+  #
+  # - id: "say-registration"
+  #   label: "Say Registration Status"
+  #   description: "Announce AllStar registration status"
+  #   command: "rpt fun {node} *A5"
+  #   repeaters: ["vhf", "uhf"]
+  #
+  # - id: "parrot"
+  #   label: "Parrot (one-time)"
+  #   description: "Repeat back the next transmission once, for an audio test"
+  #   command: "rpt fun {node} *A9"
+  #   repeaters: ["vhf", "uhf"]
+
+
+# ─── QRZ.com Callsign Lookup ──────────────────────────────────────────────────
+# Optional. Powers /qrz and the tx_operators startup sanity check below.
+# Delete this whole block (or leave api_key blank) if you don't have a QRZ
+# XML data subscription — the bot degrades gracefully with QRZ features
+# simply unavailable.
+
+qrz:
+  username: "YOUR_QRZ_USERNAME"
+  api_key:  "YOUR_QRZ_XML_API_KEY"
+
+
+# ─── Asterisk / AllStar Repeater Control ──────────────────────────────────────
+# AMI credentials live per-repeater above. This block controls Discord-side
+# settings for the /link, /unlink, /node-status, and /repeater-cmd commands.
+
+asterisk:
+  enabled: true
+
+  # Discord role required for link/unlink/repeater-cmd commands.
+  # Defaults to controller_role if blank. Set to a stricter role for safety.
+  operator_role: ""
+
+
+# ─── Discord → Repeater Transmit (TX) ─────────────────────────────────────────
+# Two-way audio: lets specific Discord users key up the active repeater by
+# talking normally in the voice channel. See repeater_audio.py's send_frame()
+# and allstar_discord_bot.py's TX-lock/sink implementation for the mechanics.
+# Requires the optional discord-ext-voice-recv dependency (see requirements.txt)
+# — the bot runs fine without it, TX is just unavailable until it's installed.
+#
+# READ THIS BEFORE ENABLING:
+#   - The bot cannot verify anyone's amateur radio license. Whoever is on
+#     tx_operators below IS whoever can transmit — that's a human/policy
+#     decision, not something software enforces. Curate this list carefully.
+#   - Only one person can hold the repeater's TX lock at a time (per
+#     repeater, not per Discord guild) — first qualifying speaker to talk
+#     captures it; everyone else is silently not relayed until they release
+#     it (same as a real repeater: a second station keying up over an
+#     already-active one just doesn't get through).
+#   - max_transmission_seconds is a hard bot-side cutoff, independent of
+#     whatever timeout timer (`totime`) your node's own rpt.conf already
+#     enforces — defense in depth against a stuck-open carrier.
+#   - Content responsibility (no music, no broadcasting, no profanity — see
+#     FCC Part 97 or your own country's equivalent) stays with whoever's on
+#     tx_operators. The bot logs who transmitted and for how long to the
+#     activity channel, for accountability, but doesn't and can't moderate
+#     content in real time.
+#   - /tx-kill (operator_role-gated) immediately force-releases whichever
+#     lock is currently held on the active repeater, regardless of who's
+#     holding it — use it if something inappropriate is going out.
+
+tx:
+  enabled: false   # leave off until tx_operators below is populated and
+                    # you've read the notes above
+
+  max_transmission_seconds: 180
+
+  # How long to keep the carrier up after Discord voice packets stop, before
+  # actually releasing the TX lock — bridges a natural mid-sentence pause in
+  # Discord's own packet stream so the repeater doesn't chop the transmission
+  # and re-key mid-word. Discord's own client-side VAD already determines
+  # "is this person talking" (packets only arrive while they're transmitting),
+  # so — unlike the RX-side vad_rms_threshold above — this isn't an energy
+  # threshold, just a silence-duration bridge.
+  release_hangover_seconds: 1.0
+
+  # app_rpt phone-mode PTT: audio sent into an Rpt(node|P) dialplan call is
+  # DISCARDED until PTT is asserted in-band with DTMF *99, and # unkeys —
+  # the same convention as dialing in from a phone. The bot sends these
+  # automatically on TX lock acquire/release, so operators just talk (the
+  # Discord VAD → TX lock → DTMF chain behaves like VOX end to end). Only
+  # change these if your dialplan uses a different convention; empty string
+  # disables sending entirely. Your [discord-audio] dialplan must hand the
+  # call to Rpt() with the P option, e.g.
+  #   exten => 53209,3,Rpt(53209|P)
+  # WARNING: do NOT use |D (dumb phone mode) — it keys the transmitter
+  # CONTINUOUSLY for the duration of the call, and this bot holds its
+  # monitor calls open 24/7. |P is the correct mode here.
+  ptt_key_dtmf: "*99"
+  ptt_unkey_dtmf: "#"
+
+  # Sanity-check each tx_operators callsign against QRZ at startup (requires
+  # qrz: to be configured above). Warns on mismatch/lookup failure; never
+  # blocks startup or gates transmission — QRZ being briefly unreachable
+  # shouldn't be able to silently disable everyone's ability to transmit.
+  verify_with_qrz_on_startup: true
+
+
+# ─── TX Operators ──────────────────────────────────────────────────────────────
+# The actual gate for who can transmit. discord_user_id is the numeric
+# Discord user ID (right-click a user → Copy User ID; requires Developer
+# Mode enabled in Discord settings), not their username/nickname — usernames
+# and nicknames are trivially spoofable and are NOT used for authorization.
+# callsign is used for logging/accountability and the startup QRZ sanity
+# check; it is NOT verified at transmit time (there's no way to verify who's
+# actually speaking into a given Discord account in real time).
+
+tx_operators: []
+  # - discord_user_id: 123456789012345678
+  #   callsign: "W1AW"

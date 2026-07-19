@@ -1,0 +1,44 @@
+# Discord bot with voice support (includes PyNaCl for voice encryption)
+discord.py[voice]>=2.3.2
+# NOTE — PyNaCl (transitive, via the [voice] extra) is currently held at
+# 1.5.0 by discord.py's own constraint "PyNaCl<1.6,>=1.5.0". pip-audit
+# reports PYSEC-2026-3002 against 1.5.0 with the fix in 1.6.2, which that
+# upper bound excludes: the upgrade is BLOCKED UPSTREAM and cannot be
+# resolved here (adding `pynacl>=1.6.2` makes the install unsatisfiable).
+# The advisory is suppressed by ID in the CI audit step so that NEW
+# vulnerabilities still surface. Revisit when discord.py relaxes the cap —
+# then drop the --ignore-vuln flag in .github/workflows/ci.yml.
+
+# YAML config file parsing
+pyyaml>=6.0.1
+
+# Async HTTP — QRZ.com lookups and solar propagation data
+aiohttp>=3.9.0
+
+# Beautiful terminal dashboard and logging
+rich>=13.7.0
+
+# SIP/RTP client — the sole repeater audio path (no Icecast/FFmpeg fallback)
+# Requires Asterisk sip_custom.conf + extensions_custom.conf on HamVOIP boxes.
+# See repeater_audio.py docstring for setup instructions.
+# rfcvoip is a maintained continuation of PyVoIP (which is unmaintained).
+# NOTE: rfcvoip is GPLv3-licensed (PyVoIP was MIT) — only relevant if this
+# bot is ever redistributed outside the club.
+# PINNED: v7.1 reaches into rfcvoip internals — SIP identifier Counter
+# seeding (repeater_audio's zombie-dialog fix relies on phone.sip.callID.x)
+# and the sipPort/rtpPortLow/rtpPortHigh kwargs. An unreviewed upgrade could
+# silently change these. Bump deliberately: read the diff, re-test startup
+# with two concurrent monitors, then update this pin.
+rfcvoip==2.10.2
+
+# Voice RECEIVE for Discord — base discord.py is send-only, this adds the
+# ability to capture Discord users' mic audio (needed for TX: Discord → repeater).
+# Only required if tx.enabled is true in config.yaml — the bot degrades
+# gracefully (TX unavailable, everything else works normally) if this isn't
+# installed. Labeled "Experimental" upstream with a small maintainer base —
+# same category of risk as rfcvoip above, not a mature/heavily-used library.
+# PINNED: the TX decoder hardening wraps PacketDecoder.pop_data and the
+# CryptoError log filter matches this version's exact message text — both
+# are internals an upgrade could change. Bump deliberately, re-test a TX
+# session, and check the hardening log line still appears at startup.
+discord-ext-voice-recv==0.5.2a179

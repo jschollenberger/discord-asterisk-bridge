@@ -1,0 +1,21 @@
+# Dependabot pairs with the exact pins in requirements.txt: instead of pins
+# going stale forever, each bump arrives as a PR where CI — including the
+# tests that exercise rfcvoip/voice-recv INTERNALS this project patches —
+# proves whether the upgrade is actually safe. Merge green PRs; investigate
+# red ones before touching the pin.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-deps:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

@@ -1,0 +1,36 @@
+# K2BR Repeater Bot — tooling configuration.
+# (Runtime dependencies live in requirements.txt; this file only configures
+# pytest and ruff. The project is run from source, not installed as a package.)
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# The app modules configure logging (Rich console handler) at import; keep
+# pytest's own capture from double-printing every record.
+log_cli = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+# Generated/vendored content and the fixture tree aren't lint targets.
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# Start pragmatic: pyflakes (real bugs — undefined names, unused imports),
+# plus the error-class pycodestyle rules. Style-only rules are deliberately
+# out of scope for now — this codebase favors aligned assignments and long
+# explanatory comments, and churning it for cosmetics buys nothing.
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = [
+    "E701",  # compact `if cond: return` guard — deliberate house idiom
+    "E702",  # compact statements in tiny test fakes
+    "E731",  # lambda assignments — used intentionally for tiny callbacks
+    "E741",  # ambiguous single-letter names — not present, but harmless
+    "B008",  # function call in default arg — discord.py decorator idiom
+]
+
+[tool.ruff.lint.per-file-ignores]
+# TYPE_CHECKING-gated and lazy imports are load-bearing in the bot module
+# (heavy deps are imported only when the feature is used).
+"allstar_discord_bot.py" = ["E402"]
+"tests/*" = ["E402"]  # conftest must chdir before app imports
