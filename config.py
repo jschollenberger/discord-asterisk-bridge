@@ -31,7 +31,7 @@ import yaml
 
 # Single source of truth for the bot version — used by the startup banner,
 # log lines, and the QRZ API user-agent, so a release bump is one edit.
-BOT_VERSION = "7.1"
+BOT_VERSION = "1.0.0"
 
 CONFIG_PATH = Path("config.yaml")
 
@@ -43,9 +43,9 @@ class BotConfig:
     token:                str
     prefix:               str
     log_file:             str
-    log_file_level:       str       # file-log verbosity: DEBUG (everything,
-                                      # the pre-7.1 behavior) or INFO for
-                                      # normal operation. Console is always
+    log_file_level:       str       # file-log verbosity: DEBUG (everything)
+                                      # or INFO for normal operation. Console
+                                      # is always
                                       # INFO+. Flip to DEBUG when chasing an
                                       # issue; the SIP heartbeat aggregator
                                       # keeps even DEBUG mode readable.
