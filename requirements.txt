@@ -1,5 +1,5 @@
 # Discord bot with voice support (includes PyNaCl for voice encryption)
-discord.py[voice]>=2.3.2
+discord.py[voice]>=2.7.1
 # NOTE — PyNaCl (transitive, via the [voice] extra) is currently held at
 # 1.5.0 by discord.py's own constraint "PyNaCl<1.6,>=1.5.0". pip-audit
 # reports PYSEC-2026-3002 against 1.5.0 with the fix in 1.6.2, which that
@@ -10,13 +10,13 @@ discord.py[voice]>=2.3.2
 # then drop the --ignore-vuln flag in .github/workflows/ci.yml.
 
 # YAML config file parsing
-pyyaml>=6.0.1
+pyyaml>=6.0.3
 
 # Async HTTP — QRZ.com lookups and solar propagation data
-aiohttp>=3.9.0
+aiohttp>=3.14.1
 
 # Beautiful terminal dashboard and logging
-rich>=13.7.0
+rich>=15.0.0
 
 # SIP/RTP client — the sole repeater audio path (no Icecast/FFmpeg fallback)
 # Requires Asterisk sip_custom.conf + extensions_custom.conf on HamVOIP boxes.
