@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] — 2026-07-22
+
+Bug-fix release.
+
+### Fixed
+- **Discord "speaking" indicator no longer stays lit after a transmission.**
+  AllStar's phone-mode call streams continuous RTP (~50 fps even in silence),
+  so the playback buffer was refilled as fast as it drained and rarely reached
+  empty — the pause fired only on a random timing coincidence (often long after
+  the over, or not before the next one). Playback now stops enqueueing incoming
+  frames once VAD declares end-of-transmission, so the buffered tail drains and
+  the pause fires promptly (~1–2 s) and deterministically. (#21)
+- **Dashboard "Stream Up" resets when switching presets** — it was counting
+  from the original stream start (effectively bot uptime) rather than the
+  current preset's stream. (#20)
+- **Dashboard "Recon." counts only genuine reconnects** (auto-reconnect after a
+  drop, watchdog recovery) — not user-initiated preset switches or manual
+  `/reconnect`, which were inflating it while the most genuine event
+  (auto-reconnect) wasn't counted at all. (#20)
+
+### Added
+- DEBUG-level instrumentation across the VAD → playback pause/resume cycle
+  (start/end of transmission with RMS, buffer-drained pause request, and the
+  bot-side resume/pause) — visible at `bot.log_file_level: DEBUG`. (#21)
+
 ## [1.0.2] — 2026-07-22
 
 Bug-fix release.
@@ -99,7 +124,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jschollenberger/discord-asterisk-bridge/releases/tag/v1.0.0
