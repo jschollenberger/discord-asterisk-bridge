@@ -276,6 +276,89 @@ def _setup_logging() -> logging.Logger:
 
     logging.getLogger("k2br.sip").addFilter(_SipHeartbeatAggregator())
 
+    class _VoiceReconnectFilter(logging.Filter):
+        """
+        Tame discord.voice_state's routine reconnect churn. Discord rotates a
+        long-running voice connection between its own voice servers, closing
+        the old WebSocket with code 1006 (or letting it time out) and handing
+        the bot a fresh endpoint; discord.py reconnects transparently within a
+        second or two and playback resumes on its own (our _after_play /
+        watchdog backstops never even fire). Over a multi-day run that's ~one
+        cycle every few hours — each an identical ConnectionClosed traceback
+        logged at ERROR, which reads like a crash to anyone who doesn't know
+        it's normal.
+
+        Policy:
+          - "Disconnected from voice…": drop the (always-identical, non-
+            diagnostic) traceback and demote to a single plain-English INFO
+            line that says it's routine and self-healing. BUT if these cluster
+            — >= THRESHOLD within WINDOW, i.e. a retry storm or a genuinely
+            failing reconnect rather than normal server rotation — keep it at
+            WARNING, RETAIN the traceback, and report the count so an actual
+            problem stays unmistakably loud.
+          - The interim handshake chatter (Connecting/Starting/complete/
+            terminated): demote to DEBUG so it's out of the way at INFO but
+            still there when log_file_level is DEBUG for troubleshooting.
+          - "Voice connection complete." and anything else: pass through
+            untouched, so recovery stays visible and any unexpected
+            voice_state message keeps its original level.
+        """
+        WINDOW    = 600.0   # 10 minutes
+        THRESHOLD = 5       # reconnects within WINDOW before we escalate
+
+        _HANDSHAKE = (
+            "Connecting to voice",
+            "Starting voice handshake",
+            "Voice handshake complete",
+            "The voice handshake is being terminated",
+        )
+
+        def __init__(self):
+            super().__init__()
+            self._events: deque[float] = deque()
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+
+            if msg.startswith("Disconnected from voice"):
+                exc    = record.exc_info[1] if record.exc_info else None
+                code   = getattr(exc, "code", None)
+                reason = f"close code {code}" if code is not None else "connection timeout"
+
+                now = time.time()
+                self._events.append(now)
+                while self._events and now - self._events[0] > self.WINDOW:
+                    self._events.popleft()
+                n = len(self._events)
+
+                record.args = ()
+                if n >= self.THRESHOLD:
+                    # Abnormal: stays loud and keeps the traceback for diagnosis.
+                    record.levelno   = logging.WARNING
+                    record.levelname = "WARNING"
+                    record.msg = (f"Voice link dropped ({reason}) — {n} reconnects in the last "
+                                  f"{int(self.WINDOW / 60)} min. That's more than routine server "
+                                  f"rotation; if it keeps up, check the host's network or Discord's "
+                                  f"voice status.")
+                else:
+                    # Routine: one clean INFO line, no alarming traceback.
+                    record.levelno   = logging.INFO
+                    record.levelname = "INFO"
+                    record.exc_info  = None
+                    record.exc_text  = None
+                    record.msg = (f"Voice link dropped ({reason}) and auto-reconnecting — routine "
+                                  f"for a long-running Discord voice connection, not an error.")
+                return True
+
+            if msg.startswith(self._HANDSHAKE):
+                record.levelno   = logging.DEBUG
+                record.levelname = "DEBUG"
+                return True
+
+            return True
+
+    logging.getLogger("discord.voice_state").addFilter(_VoiceReconnectFilter())
+
     for noisy in ("discord.gateway", "discord.client", "discord.http", "discord.ext.voice_recv"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 

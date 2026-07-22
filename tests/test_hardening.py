@@ -46,6 +46,50 @@ def test_cryptoerror_filter_demotes_and_rate_limits(bot_module, caplog):
     assert len(passthru) == 1 and passthru[0].levelno == logging.ERROR
 
 
+def test_voice_reconnect_filter_demotes_and_escalates(bot_module, caplog):
+    lg = logging.getLogger("discord.voice_state")
+    vf = [f for f in lg.filters if type(f).__name__ == "_VoiceReconnectFilter"]
+    assert vf, "voice-reconnect filter must be attached to discord.voice_state"
+    f = vf[0]
+    f._events.clear()
+
+    class _Closed(Exception):
+        code = 1006
+
+    with caplog.at_level(logging.DEBUG, logger="discord.voice_state"):
+        # Routine single disconnect → demoted to a clean INFO line, no traceback.
+        lg.error("Disconnected from voice... Reconnecting in 1.98s.",
+                 exc_info=(_Closed, _Closed(), None))
+        # Interim handshake chatter → demoted to DEBUG (hidden at INFO).
+        lg.info("Connecting to voice...")
+        # Recovery → passes through untouched at INFO.
+        lg.info("Voice connection complete.")
+
+    routine = [r for r in caplog.records if "auto-reconnecting" in r.getMessage()]
+    assert len(routine) == 1
+    assert routine[0].levelno == logging.INFO
+    assert routine[0].exc_info is None                      # scary traceback stripped
+    assert "close code 1006" in routine[0].getMessage()
+
+    handshake = [r for r in caplog.records if r.getMessage() == "Connecting to voice..."]
+    assert len(handshake) == 1 and handshake[0].levelno == logging.DEBUG
+
+    complete = [r for r in caplog.records if r.getMessage() == "Voice connection complete."]
+    assert len(complete) == 1 and complete[0].levelno == logging.INFO   # recovery stays visible
+
+    # A reconnect storm (>= THRESHOLD in the window) escalates to WARNING and
+    # keeps the traceback, so a genuinely failing reconnect stays loud.
+    f._events.clear()
+    with caplog.at_level(logging.DEBUG, logger="discord.voice_state"):
+        for _ in range(f.THRESHOLD):
+            lg.error("Disconnected from voice... Reconnecting in 0.5s.",
+                     exc_info=(_Closed, _Closed(), None))
+    escalated = [r for r in caplog.records if "more than routine" in r.getMessage()]
+    assert escalated, "a reconnect storm must escalate to WARNING"
+    assert escalated[-1].levelno == logging.WARNING
+    assert escalated[-1].exc_info is not None               # detail retained when abnormal
+
+
 def test_sip_heartbeat_aggregator(bot_module, caplog):
     lg = logging.getLogger("k2br.sip")
     hb = [f for f in lg.filters if type(f).__name__ == "_SipHeartbeatAggregator"]
