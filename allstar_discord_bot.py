@@ -54,7 +54,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from ami import AMIClient, monitor as node_monitor
+from ami import AMIClient, AMICommandError, monitor as node_monitor
 from config import cfg, REPEATER_COMMAND_PLACEHOLDER, BOT_VERSION
 from qrz import QRZClient, QRZError
 from solar import fetch_solar
@@ -2582,18 +2582,43 @@ async def repeater_cmd_cmd(ctx: commands.Context, command: str, repeater: Option
         )
 
     await ctx.defer()
+    ami_command = entry.command.format(node=rpt.allstar_node)
+    # Log the concrete destination up front: which repeater, which AllStar node,
+    # and which AMI endpoint the command is dispatched to. (The invoking channel
+    # is already logged on the SLASH line above; the resolution provenance is in
+    # the Discord reply. What matters here is where it actually went.)
+    log.info(
+        f"Repeater command '{entry.id}' ({entry.label}) → `{ami_command}` "
+        f"[target {rpt.id} · node {rpt.allstar_node} · AMI {rpt.ami.host}:{rpt.ami.port}]"
+    )
     try:
-        ami_command = entry.command.format(node=rpt.allstar_node)
         output = await client.run_command(ami_command)
-        log.info(f"Repeater command '{entry.id}' → `{ami_command}` [{rpt.id} · {how}]")
-        msg = (f"📻 Ran **{entry.label}** on **{rpt.display_name}** "
-               f"(Node `{rpt.allstar_node}`) {_target_note(rpt, how)}")
-        if output.strip():
-            msg += f"\n```{output.strip()[:1500]}```"
-        await ctx.send(msg)
+    except AMICommandError as exc:
+        log.error(
+            f"Repeater command '{entry.id}' REJECTED by {rpt.id}'s Asterisk "
+            f"(node {rpt.allstar_node} · AMI {rpt.ami.host}:{rpt.ami.port}): {exc}"
+        )
+        return await ctx.send(
+            f"❌ **{entry.label}** was rejected by **{rpt.display_name}**'s Asterisk: `{exc}`"
+        )
     except Exception as exc:
-        log.error(f"repeater-cmd '{command}' failed: {exc}")
-        await ctx.send(f"❌ AMI error: `{exc}`")
+        log.error(
+            f"Repeater command '{entry.id}' failed [target {rpt.id} · node {rpt.allstar_node} "
+            f"· AMI {rpt.ami.host}:{rpt.ami.port}]: {exc}",
+            exc_info=True,
+        )
+        return await ctx.send(f"❌ AMI error running **{entry.label}**: `{exc}`")
+
+    result = output.strip()
+    log.info(
+        f"Repeater command '{entry.id}' completed on {rpt.id} (node {rpt.allstar_node}) — "
+        + (f"output: {result[:200]!r}" if result else "no CLI output (normal for rpt fun / DTMF injection)")
+    )
+    msg = (f"📻 Ran **{entry.label}** on **{rpt.display_name}** "
+           f"(Node `{rpt.allstar_node}`) {_target_note(rpt, how)}")
+    if result:
+        msg += f"\n```{result[:1500]}```"
+    await ctx.send(msg)
 
 
 async def _repeater_target_autocomplete(interaction: discord.Interaction, current: str):
