@@ -1476,6 +1476,7 @@ class ControlPanelView(discord.ui.View):
         is why Discord showed 'This interaction failed' even though the action itself
         completed successfully.
         """
+        assert ix.guild is not None  # panel only exists in a guild
         try:
             await ix.edit_original_response(embed=_status_embed(ix.guild.id), view=self)
         except Exception as exc:
@@ -1495,6 +1496,7 @@ class ControlPanelView(discord.ui.View):
 
     @discord.ui.button(label="▶ Start",     style=discord.ButtonStyle.green,   custom_id="cp_start")
     async def btn_start(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
         log.debug(f"btn_start invoked by {ix.user} [{ix.guild}]")
         if await self._deny(ix): return
         # Use ix.member (always a Member in guild contexts) rather than ix.user
@@ -1521,6 +1523,7 @@ class ControlPanelView(discord.ui.View):
 
     @discord.ui.button(label="⏹ Stop",      style=discord.ButtonStyle.red,     custom_id="cp_stop")
     async def btn_stop(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
         try:
             await ix.response.defer()
@@ -1545,6 +1548,7 @@ class ControlPanelView(discord.ui.View):
 
     @discord.ui.button(label="🔄 Reconnect", style=discord.ButtonStyle.blurple, custom_id="cp_reconnect")
     async def btn_reconnect(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
         vc = ix.guild.voice_client
         if vc is None:
@@ -1576,6 +1580,7 @@ class ControlPanelView(discord.ui.View):
         VAD-paused stream counts as live, and a repeater with its own
         channel on the primary moves the bot there as part of the switch.
         """
+        assert ix.guild is not None  # panel only exists in a guild
         rpt = cfg.repeater_by_id(preset_id)
         if rpt is None:
             return f"❌ Unknown repeater '{preset_id}'."
@@ -1604,6 +1609,7 @@ class ControlPanelView(discord.ui.View):
 
     @discord.ui.button(label="📻 VHF 146.745", style=discord.ButtonStyle.blurple, custom_id="cp_vhf")
     async def btn_vhf(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
         try:
             await ix.response.defer()
@@ -1622,6 +1628,7 @@ class ControlPanelView(discord.ui.View):
 
     @discord.ui.button(label="📡 UHF 448.775", style=discord.ButtonStyle.blurple, custom_id="cp_uhf")
     async def btn_uhf(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
         uhf_rpt = cfg.repeater_by_id("uhf")
         if not uhf_rpt or not uhf_rpt.sip_audio:
@@ -1958,6 +1965,7 @@ async def _do_join(guild: discord.Guild, channel) -> str:
 @bot.hybrid_command(name="join", description="Join your voice channel and start streaming.")
 @commands.guild_only()
 async def join_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _has_access(ctx):
         return await ctx.send("❌ No permission.", ephemeral=True)
     if ctx.author.voice is None:
@@ -1969,6 +1977,7 @@ async def join_cmd(ctx: commands.Context):
 @bot.hybrid_command(name="leave", description="Stop streaming and disconnect.")
 @commands.guild_only()
 async def leave_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _has_access(ctx):
         return await ctx.send("❌ No permission.", ephemeral=True)
     vc = ctx.voice_client
@@ -1989,12 +1998,14 @@ async def leave_cmd(ctx: commands.Context):
 @bot.hybrid_command(name="status", description="Show current stream status.")
 @commands.guild_only()
 async def status_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     await ctx.send(embed=_status_embed(ctx.guild.id), ephemeral=True)
 
 
 @bot.hybrid_command(name="panel", description="Post the interactive control panel here.")
 @commands.guild_only()
 async def panel_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
 
 
@@ -2015,6 +2026,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
     - If the user is in a voice channel but bot isn't: join and start.
     - Otherwise: set the preset so the next /join or ▶ Start uses it.
     """
+    assert ctx.guild is not None  # guaranteed by the @commands.guild_only() callers
     if not await _has_access(ctx):
         await ctx.send("❌ No permission.", ephemeral=True)
         return
@@ -2115,6 +2127,7 @@ async def _preset_autocomplete(interaction: discord.Interaction, current: str):
 @bot.hybrid_command(name="reconnect", description="Force-reconnect the audio stream.")
 @commands.guild_only()
 async def reconnect_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _has_access(ctx):
         return await ctx.send("❌ No permission.", ephemeral=True)
     vc = ctx.voice_client
@@ -2136,6 +2149,7 @@ async def reconnect_cmd(ctx: commands.Context):
 @bot.hybrid_command(name="presets", description="List all configured repeaters.")
 @commands.guild_only()
 async def presets_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     gs = get_state(ctx.guild.id)
     e  = discord.Embed(title="📋 Repeaters", color=discord.Color.blurple())
     for rpt in cfg.repeaters:
@@ -2222,6 +2236,7 @@ def _resolve_target_repeater(ctx: commands.Context, explicit: Optional[str]):
         if len(matches) == 1:
             return matches[0], "this channel"
 
+    assert ctx.guild is not None  # only reached from guild-only operator commands
     rpt = cfg.repeater_by_id(get_state(ctx.guild.id).preset)
     return rpt, "active preset"
 
@@ -2251,6 +2266,7 @@ async def _ami_check(ctx: commands.Context) -> bool:
 @commands.guild_only()
 async def link_repeaters_cmd(ctx: commands.Context):
     """Links VHF node 50420 ↔ UHF node 53209 via the VHF AMI."""
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _ami_check(ctx): return
     vhf = cfg.repeater_by_id("vhf")
     uhf = cfg.repeater_by_id("uhf")
@@ -2281,6 +2297,7 @@ async def link_repeaters_cmd(ctx: commands.Context):
 @bot.hybrid_command(name="unlink-repeaters", description="Unlink the VHF and UHF repeaters.")
 @commands.guild_only()
 async def unlink_repeaters_cmd(ctx: commands.Context):
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _ami_check(ctx): return
     vhf = cfg.repeater_by_id("vhf")
     uhf = cfg.repeater_by_id("uhf")
@@ -2499,6 +2516,7 @@ async def tx_status_cmd(ctx: commands.Context):
 async def tx_kill_cmd(ctx: commands.Context, repeater: Optional[str] = None):
     if not await _has_ami_access(ctx):
         return await ctx.send("❌ You need the operator role to do this.", ephemeral=True)
+    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not cfg.tx.enabled:
         return await ctx.send("❌ TX is not enabled in config.yaml.", ephemeral=True)
     rpt, how = _resolve_target_repeater(ctx, repeater)
