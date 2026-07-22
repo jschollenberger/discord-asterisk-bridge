@@ -1602,6 +1602,7 @@ class ControlPanelView(discord.ui.View):
                     gs.channel = ch.name
             _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
             gs.reconnects += 1
+            gs.started_at = datetime.now(timezone.utc).timestamp()   # switching preset is a fresh stream — reset "Stream Up"
             log.info(f"Switched to {preset_id} via panel [{ix.guild.name}]")
         return None
 
@@ -2081,6 +2082,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
             gs.channel = target_ch.name
         _play_paused(vc, _make_source(gs.preset, ctx.guild.id), after=lambda e: _after_play(e, vc))
         gs.reconnects += 1
+        gs.started_at = datetime.now(timezone.utc).timestamp()   # switching preset is a fresh stream — reset "Stream Up"
         moved = f" in **{target_ch.name}**" if target_ch is not None else ""
         log.info(f"Switched to preset '{preset_id}'{' + moved channel' if target_ch else ''} [{ctx.guild.name}]")
         await ctx.send(f"🔀 Now streaming **{label}**{freq}{moved}")
