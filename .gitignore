@@ -12,8 +12,9 @@ __pycache__/
 venv/
 env/
 
-# Test artifacts
-tests/fixtures/test_run.log
+# Test artifacts. Trailing glob also covers rotated logs (test_run.log.1,
+# .log.2, ...) — the bare *.log rule below does NOT match the .log.N suffix.
+tests/fixtures/test_run.log*
 .pytest_cache/
 .ruff_cache/
 
