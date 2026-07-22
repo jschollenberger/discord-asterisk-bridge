@@ -151,7 +151,7 @@ class RepeaterConfig:
                             # so omitting it keeps normal behavior.
     ami:           Optional[RepeaterAMIConfig]
     sip_audio:     Optional[SIPAudioConfig]    # None = repeater has no audio path configured
-    discord:       "RepeaterDiscordConfig" = None  # always filled in by load()
+    discord:       "RepeaterDiscordConfig" = None  # type: ignore[assignment]  # always filled in by load()
 
 
 @dataclass

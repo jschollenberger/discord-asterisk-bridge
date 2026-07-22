@@ -36,6 +36,25 @@ jobs:
       - name: Ruff (lint)
         run: ruff check .
 
+  typecheck:
+    # Static type check (mypy). Needs the runtime deps installed so the typed
+    # third-party packages (discord.py, aiohttp, rfcvoip — all ship py.typed)
+    # resolve. allstar_discord_bot.py is checked but not yet gating; see the
+    # per-module override in pyproject.toml.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Mypy (type check)
+        run: mypy
+
   test:
     strategy:
       fail-fast: false

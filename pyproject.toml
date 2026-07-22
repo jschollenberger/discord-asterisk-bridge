@@ -34,3 +34,24 @@ ignore = [
 # (heavy deps are imported only when the feature is used).
 "allstar_discord_bot.py" = ["E402"]
 "tests/*" = ["E402"]  # conftest must chdir before app imports
+
+[tool.mypy]
+python_version = "3.12"
+# Type-check the application modules. Tests use fakes/mocks and stay out of
+# scope for now — same posture as ruff excluding the fixtures.
+files = ["allstar_discord_bot.py", "ami.py", "config.py", "qrz.py", "repeater_audio.py"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# discord-ext-voice-recv and PyYAML ship no type information (no py.typed).
+[[tool.mypy.overrides]]
+module = ["discord.ext.voice_recv.*", "yaml"]
+ignore_missing_imports = true
+
+# allstar_discord_bot.py (~3k lines) is being cleaned incrementally. It is
+# checked but not yet gating: ~110 findings, dominated by Optional-narrowing
+# (union-attr) around discord.py's nullable fields (interaction.guild, etc.).
+# Remove this override once those are burned down, then it gates like the rest.
+[[tool.mypy.overrides]]
+module = "allstar_discord_bot"
+ignore_errors = true
