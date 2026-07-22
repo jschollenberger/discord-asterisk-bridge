@@ -39,7 +39,7 @@ ignore = [
 python_version = "3.12"
 # Type-check the application modules. Tests use fakes/mocks and stay out of
 # scope for now — same posture as ruff excluding the fixtures.
-files = ["allstar_discord_bot.py", "ami.py", "config.py", "qrz.py", "repeater_audio.py"]
+files = ["allstar_discord_bot.py", "ami.py", "config.py", "qrz.py", "repeater_audio.py", "solar.py"]
 warn_unused_ignores = true
 warn_redundant_casts = true
 
