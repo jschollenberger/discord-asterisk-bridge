@@ -108,6 +108,7 @@ class QRZClient:
         """
         if not self._session_key:
             await self._authenticate()
+        assert self._session_key is not None  # _authenticate() sets it or raises
 
         cs_upper = callsign.upper().strip()
         params   = {"s": self._session_key, "callsign": cs_upper}

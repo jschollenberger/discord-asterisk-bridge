@@ -126,7 +126,7 @@ import time
 import wave
 from collections import deque
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import discord
 
@@ -337,7 +337,7 @@ class RepeaterAudioClient:
         password:          str,
         extension:         str,
         local_ip:          str = "",
-        on_transmission:   Optional[Callable[[float], None]] = None,
+        on_transmission:   Optional[Callable[[float, Optional[bytes]], None]] = None,
         on_speaking_change: Optional[Callable[[bool], None]] = None,
         on_drained:        Optional[Callable[[], None]] = None,
         vad_rms_threshold: int = 400,
@@ -387,7 +387,7 @@ class RepeaterAudioClient:
         self._thread: Optional[threading.Thread] = None
 
         self._buffer: deque[bytes] = deque(maxlen=BUFFER_MAXFRAMES)
-        self._resample_state = None   # maintained across frames for smooth audio — RX direction
+        self._resample_state: Any = None   # opaque audioop.ratecv cookie, carried across frames — RX direction
 
         # VAD state — see _update_vad()
         self._on_transmission    = on_transmission
@@ -418,7 +418,7 @@ class RepeaterAudioClient:
         # different thread (e.g. Discord voice-receive) than the one running
         # _connect_and_stream(), so no other synchronization is added here.
         self._call = None
-        self._tx_resample_state = None   # separate from _resample_state — TX direction
+        self._tx_resample_state: Any = None   # separate from _resample_state — TX direction
         self._tx_frames_sent = 0          # DEBUG visibility only — see send_frame()
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -929,6 +929,7 @@ class RepeaterAudioClient:
         # hangover window itself (a known, fixed quantity) so the reported
         # duration reflects actual voice activity, not voice + the trailing
         # silence we waited through before declaring it over.
+        assert self._activity_start_ts is not None  # set on the voice-active edge above
         duration = (time.time() - self._activity_start_ts) - self._vad_hangover_seconds
         self._voice_active      = False
         self._activity_start_ts = None
