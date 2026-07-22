@@ -46,6 +46,43 @@ def test_drain_then_pause_fires_on_drained_once():
     assert c.read_frame() == ra.SILENCE and events == ["pause"]  # exactly once
 
 
+def test_ingest_drops_frames_while_pause_pending():
+    """Continuous RTP must not refill the playback buffer once VAD has declared
+    end-of-transmission. AllStar's phone-mode call streams ~50 fps even in
+    silence, so if we kept enqueueing, the buffer would never drain to empty and
+    the pause (Discord speaking indicator off) would never fire."""
+    c = _bare_client()
+    c._resample_state = None
+    c._on_transmission = None
+    c._on_speaking_change = None
+    frame = bytes(ra.RTP_FRAME_BYTES)
+
+    c._ingest_rx_frame(frame)            # not pausing → buffered
+    assert len(c._buffer) == 1
+    c._pause_pending = True
+    for _ in range(10):
+        c._ingest_rx_frame(frame)        # pausing → dropped
+    assert len(c._buffer) == 1           # unchanged
+
+
+def test_drain_fires_pause_despite_continuous_rtp():
+    """End-to-end guarantee: with RTP still arriving on every frame, a pending
+    pause still drains to empty and fires on_drained exactly once."""
+    events = []
+    c = _bare_client()
+    c._resample_state = None
+    c._on_transmission = None
+    c._on_speaking_change = None
+    c._on_drained = lambda: events.append("pause")
+    c._buffer.extend([b"a", b"b"])       # buffered tail captured at VAD end
+    c._pause_pending = True
+    frame = bytes(ra.RTP_FRAME_BYTES)
+    for _ in range(4):
+        c._ingest_rx_frame(frame)        # continuous RTP — must NOT refill
+        c.read_frame()                   # player draining in lockstep
+    assert events == ["pause"]           # drained + paused despite the RTP
+
+
 def test_flush_clears_buffer_and_stale_pause():
     c = _bare_client()
     c._buffer.append(b"x")
