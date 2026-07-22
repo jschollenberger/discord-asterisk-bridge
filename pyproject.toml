@@ -48,10 +48,22 @@ warn_redundant_casts = true
 module = ["discord.ext.voice_recv.*", "yaml"]
 ignore_missing_imports = true
 
-# allstar_discord_bot.py (~3k lines) is being cleaned incrementally. It is
-# checked but not yet gating: ~110 findings, dominated by Optional-narrowing
-# (union-attr) around discord.py's nullable fields (interaction.guild, etc.).
-# Remove this override once those are burned down, then it gates like the rest.
+# allstar_discord_bot.py (~3k lines) is being type-cleaned incrementally (the
+# mypy burn-down batches). It IS checked now — only the error codes still
+# present are tolerated below, so any *other* error code gates CI, and each
+# batch that drives a code to zero deletes it from this list until the override
+# can go entirely. Progress: Batch 1 (guild/channel Optional-narrowing) took
+# the module from 124 → 69 errors and union-attr from 57 → 9.
 [[tool.mypy.overrides]]
 module = "allstar_discord_bot"
-ignore_errors = true
+disable_error_code = [
+    "attr-defined",   # discord.py union types (VoiceProtocol / Connectable / Member|User)
+    "arg-type",       # passing X | None where X is expected
+    "union-attr",     # remaining Optional-narrowing (voice_client, member.voice, …)
+    "return-value",
+    "call-arg",
+    "var-annotated",
+    "override",
+    "method-assign",
+    "call-overload",
+]
