@@ -36,14 +36,12 @@ import logging
 import sys
 import threading
 import time
-import xml.etree.ElementTree as ET
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from typing import Optional, TYPE_CHECKING
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
@@ -59,6 +57,7 @@ from rich.text import Text
 from ami import AMIClient, monitor as node_monitor
 from config import cfg, REPEATER_COMMAND_PLACEHOLDER, BOT_VERSION
 from qrz import QRZClient, QRZError
+from solar import fetch_solar
 
 # QRZ client (None if not configured)
 _qrz: Optional[QRZClient] = (
@@ -2580,7 +2579,7 @@ def _qrz_embed(data: dict) -> discord.Embed:
 async def solar_cmd(ctx: commands.Context):
     await ctx.defer()
     try:
-        data = await _fetch_solar()
+        data = await fetch_solar()
         await ctx.send(embed=_solar_embed(data))
     except Exception as exc:
         log.warning(f"Solar fetch failed: {exc}")
@@ -2670,52 +2669,6 @@ async def help_cmd(ctx: commands.Context):
 
     e.set_footer(text=f"{cfg.club.name} · {callsign} · {BOT_NAME}")
     await ctx.send(embed=e, ephemeral=True)
-
-
-async def _fetch_solar() -> dict:
-    """Fetch propagation data from hamqsl.com."""
-    url = "https://www.hamqsl.com/solarxml.php"
-    async with aiohttp.ClientSession() as s:
-        async with s.get(url, timeout=aiohttp.ClientTimeout(total=12)) as r:
-            text = await r.text()
-
-    root = ET.fromstring(text)
-    item = root.find(".//item")
-    if item is None:
-        item = root
-
-    def g(tag: str) -> str:
-        el = item.find(tag)
-        return el.text.strip() if el is not None and el.text else "N/A"
-
-    bands_day:   dict[str, str] = {}
-    bands_night: dict[str, str] = {}
-    for band in item.findall("calculatedconditions/band"):
-        name = band.get("name", "")
-        t    = band.get("time", "")
-        val  = band.text.strip() if band.text else "N/A"
-        (bands_day if t == "day" else bands_night)[name] = val
-
-    vhf_lines = []
-    for ph in item.findall("calculatedvhfconditions/phenomenon"):
-        name = ph.get("name", "").replace("-", " ").title()
-        loc  = ph.get("location", "").replace("_", " ").title()
-        val  = ph.text.strip() if ph.text else "N/A"
-        vhf_lines.append(f"**{name}** ({loc}): {val}")
-
-    return {
-        "solar_flux":  g("solarflux"),
-        "a_index":     g("aindex"),
-        "k_index":     g("kindex"),
-        "x_ray":       g("xray"),
-        "sunspots":    g("sunspots"),
-        "solar_wind":  g("solarwind"),
-        "mag_field":   g("magneticfield"),
-        "updated":     g("updated"),
-        "bands_day":   bands_day,
-        "bands_night": bands_night,
-        "vhf":         vhf_lines,
-    }
 
 
 def _solar_embed(data: dict) -> discord.Embed:
