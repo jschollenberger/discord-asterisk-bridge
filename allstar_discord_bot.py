@@ -76,7 +76,11 @@ class GuildState:
     streaming:   bool            = False
     preset:      str             = field(default_factory=lambda: cfg.default_preset)
     started_at:  Optional[float] = None        # unix timestamp stream began
-    reconnects:  int             = 0
+    reconnects:  int             = 0           # count of GENUINE reconnects only
+                                                # (auto-reconnect after a drop, watchdog
+                                                # recovery) — NOT user preset switches or
+                                                # manual /reconnect. A rising count is the
+                                                # at-a-glance signal of real voice instability.
     channel:     str             = "—"
 
 
@@ -1152,6 +1156,7 @@ async def _auto_reconnect(vc: discord.VoiceClient) -> None:
             _play_paused(vc, _make_source(gs.preset, vc.guild.id), after=lambda e: _after_play(e, vc))
             if not gs.started_at:
                 gs.started_at = datetime.now(timezone.utc).timestamp()
+            gs.reconnects += 1   # genuine reconnect — playback dropped and we recovered it
             log.info(f"Auto-reconnected [{vc.guild.name}] (#{gs.reconnects})")
         except Exception as exc:
             log.error(f"Auto-reconnect failed [{vc.guild.name}]: {exc}")
@@ -1564,8 +1569,8 @@ class ControlPanelView(discord.ui.View):
             vc.stop()
             await asyncio.sleep(1)
             _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
-            gs.reconnects += 1
-            log.info(f"Manual reconnect via panel [{ix.guild.name}] (#{gs.reconnects})")
+            # User-requested reconnect — deliberately does NOT bump gs.reconnects.
+            log.info(f"Manual reconnect via panel [{ix.guild.name}]")
             await self._refresh(ix)
         except Exception as exc:
             log.error(f"btn_reconnect failed [{ix.guild.name}]: {exc}", exc_info=True)
@@ -1601,7 +1606,7 @@ class ControlPanelView(discord.ui.View):
                     await vc.move_to(ch)
                     gs.channel = ch.name
             _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
-            gs.reconnects += 1
+            gs.started_at = datetime.now(timezone.utc).timestamp()   # switching preset is a fresh stream — reset "Stream Up"
             log.info(f"Switched to {preset_id} via panel [{ix.guild.name}]")
         return None
 
@@ -2080,7 +2085,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
             await vc.move_to(target_ch)
             gs.channel = target_ch.name
         _play_paused(vc, _make_source(gs.preset, ctx.guild.id), after=lambda e: _after_play(e, vc))
-        gs.reconnects += 1
+        gs.started_at = datetime.now(timezone.utc).timestamp()   # switching preset is a fresh stream — reset "Stream Up"
         moved = f" in **{target_ch.name}**" if target_ch is not None else ""
         log.info(f"Switched to preset '{preset_id}'{' + moved channel' if target_ch else ''} [{ctx.guild.name}]")
         await ctx.send(f"🔀 Now streaming **{label}**{freq}{moved}")
@@ -2141,8 +2146,8 @@ async def reconnect_cmd(ctx: commands.Context):
         _play_paused(vc, _make_source(gs.preset, ctx.guild.id), after=lambda e: _after_play(e, vc))
     except NoAudioConfiguredError as exc:
         return await ctx.send(f"❌ {exc}")
-    gs.reconnects += 1
-    log.info(f"Manual reconnect [{ctx.guild.name}] (#{gs.reconnects})")
+    # User-requested reconnect — deliberately does NOT bump gs.reconnects.
+    log.info(f"Manual reconnect [{ctx.guild.name}]")
     await ctx.send("🔄 Stream reconnected.")
 
 
