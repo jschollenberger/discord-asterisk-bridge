@@ -50,6 +50,15 @@ log = logging.getLogger("k2br.ami")
 _TIMEOUT = 10.0    # seconds for connect + read operations
 
 
+class AMICommandError(Exception):
+    """
+    An AMI 'Command' action returned 'Response: Error' — e.g. permission
+    denied, unknown command, or a node that isn't local to the box the command
+    was sent to. Raised so a rejected command surfaces loudly instead of
+    returning empty output that is indistinguishable from success.
+    """
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AMI Client
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,14 +155,21 @@ class AMIClient:
         self, reader: asyncio.StreamReader, verbose: bool = True, command: str = ""
     ) -> str:
         """
-        Read AMI Action: Command response lines until --END COMMAND--.
+        Read an AMI 'Action: Command' response and return its text output.
 
-        HamVOIP sends output lines prefixed with "Output: " (standard AMI format).
-        We also capture unprefixed lines as a fallback for non-standard builds.
-        When verbose=True the raw exchange is logged at DEBUG for diagnostics.
+        A successful command replies 'Response: Follows' … '--END COMMAND--',
+        with any CLI text on 'Output:' lines (HamVOIP's standard format; we
+        also capture unprefixed lines as a fallback for non-standard builds).
+        A rejected command replies 'Response: Error' + 'Message: <reason>' and
+        NO '--END COMMAND--' terminator — so we track the response status and,
+        on an error, raise AMICommandError(message) rather than returning empty
+        output that is indistinguishable from a silent success. When
+        verbose=True the raw exchange is logged at DEBUG for diagnostics.
         """
         raw_lines:    list[str] = []
         output_lines: list[str] = []
+        response: Optional[str] = None
+        message:  Optional[str] = None
         reading = False
 
         while True:
@@ -163,6 +179,8 @@ class AMIClient:
                 if verbose:
                     log.debug(f"AMI read timeout waiting for response to: {command!r}")
                 break
+            if not raw:          # EOF — far end closed the connection
+                break
             line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
             if verbose:
                 raw_lines.append(line)
@@ -170,18 +188,29 @@ class AMIClient:
             if "--END COMMAND--" in line:
                 break
             if line.startswith("Response:"):
+                response = line.split(":", 1)[1].strip()
                 reading = True
+                continue
+            if line.startswith("Message:"):
+                message = line.split(":", 1)[1].strip()
+                # An error reply carries no '--END COMMAND--' terminator, so its
+                # Message is the last useful line — stop here rather than
+                # blocking until the read timeout.
+                if response == "Error":
+                    break
                 continue
             if not reading:
                 continue
             if line.startswith("Output:"):
                 output_lines.append(line[7:].strip() if len(line) > 7 else "")
-            elif not line.startswith(("Privilege:", "ActionID:", "Message:")):
+            elif not line.startswith(("Privilege:", "ActionID:")):
                 if line:
                     output_lines.append(line)
 
         if verbose:
             log.debug(f"AMI raw exchange for {command!r}: {raw_lines!r}")
+        if response == "Error":
+            raise AMICommandError(message or "AMI command returned an error with no message")
         return "\n".join(output_lines)
 
     # ── Public API ───────────────────────────────────────────────────────────
