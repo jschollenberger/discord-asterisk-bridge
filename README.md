@@ -54,15 +54,57 @@ other clubs can run it against their own AllStar nodes.
 - Python 3.12+ (CI covers 3.12 and 3.13 on Linux, and 3.13 on Windows —
   which is what the reference deployment runs)
 - An AllStar/HamVOIP node (or two) with AMI and SIP access
-- A Discord bot application ([discord.com/developers/applications](https://discord.com/developers/applications))
-  with the **Message Content** privileged intent enabled (needed for prefix
-  commands), and voice permissions granted
+- A Discord bot application with the **Message Content** privileged intent and
+  voice permissions — see [Creating the Discord bot](#creating-the-discord-bot)
+  below for the full setup and the exact permission list
 - Optional: a [QRZ.com](https://www.qrz.com/) XML data subscription, for `/qrz`
 
 All Python dependencies install from `requirements.txt`. Two of them —
 `rfcvoip` and `discord-ext-voice-recv` — are pinned to exact versions
 because this project patches and depends on their internals; see the
 comments in that file before bumping either.
+
+## Creating the Discord bot
+
+If you don't already have a bot application, create one at
+[discord.com/developers/applications](https://discord.com/developers/applications):
+
+1. **New Application** → name it → **Create**.
+2. Open the **Bot** tab. **Reset Token** to reveal the token — this is the
+   `bot.token` value in `config.yaml`. Treat it like a password; anyone with it
+   controls the bot.
+3. Still on the **Bot** tab, under **Privileged Gateway Intents**, turn on
+   **Message Content Intent**. The bot needs it for its prefix (`!`) commands —
+   without it, those commands silently do nothing. Leave **Presence Intent**
+   and **Server Members Intent** off; the bot doesn't use them.
+4. Go to **OAuth2 → URL Generator**. Under **Scopes**, check:
+   - `bot`
+   - `applications.commands` — registers the slash commands
+5. A **Bot Permissions** panel appears below the scopes. Check these:
+
+   | Permission | Why it's needed |
+   |---|---|
+   | View Channels | See the voice and text channels it operates in |
+   | Send Messages | Post status, activity-feed, and command replies |
+   | Embed Links | `/status`, `/info`, and the control panel are embeds |
+   | Attach Files | Upload transmission recordings (when recording is enabled) |
+   | Connect | Join the voice channel |
+   | Speak | Stream repeater audio into the voice channel |
+
+6. Copy the generated URL at the bottom of the page, open it, select your
+   server, and authorize. (You need **Manage Server** on that server to add a
+   bot to it.)
+
+That's the complete list — the bot doesn't pin messages, add reactions,
+kick/ban, or manage roles, so it needs none of those permissions. Keep its role
+scoped to the six above rather than granting Administrator.
+
+> **Satellite bots** (streaming a second repeater into a second channel
+> simultaneously — see [Multiple repeaters, multiple
+> channels](#multiple-repeaters-multiple-channels)) are each a *separate*
+> application: repeat the steps above for each one and grant it the same
+> permissions. Satellites run no commands, so they don't need the Message
+> Content intent — only `Connect` and `Speak` (plus `View Channels`).
 
 ## Installation
 
