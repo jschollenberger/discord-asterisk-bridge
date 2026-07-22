@@ -14,6 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] — 2026-07-22
+
+Bug-fix release.
+
+### Fixed
+- AMI `Command` actions that Asterisk rejects (`Response: Error` — e.g.
+  permission denied, unknown command, or a node not local to the target box)
+  now surface as an error instead of returning empty output that looked like
+  success. `/repeater-cmd` reports the rejection with Asterisk's message rather
+  than a false "ran successfully". (#18)
+- Restored the commented-out per-repeater `discord:` placeholder in the `uhf`
+  block of `config.example.yaml` — it was only present on `vhf`.
+
+### Changed
+- `/repeater-cmd` execution logging now names the concrete dispatch
+  destination — target repeater, AllStar node, and AMI `host:port` — instead of
+  the resolution provenance, so where a command actually went is visible at a
+  glance. (#18)
+
 ## [1.0.1] — 2026-07-22
 
 Maintenance release: no new features or breaking changes. Cleaner operational
@@ -80,6 +99,7 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/jschollenberger/discord-asterisk-bridge/releases/tag/v1.0.0

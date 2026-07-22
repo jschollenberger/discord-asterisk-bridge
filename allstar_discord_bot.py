@@ -15,7 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-K2BR Repeater Bot  v1.0.1
+K2BR Repeater Bot  v1.0.2
 Streams the K2BR AllStar repeater network into Discord voice/stage channels
 over direct SIP/RTP audio (see repeater_audio.py) — no FFmpeg or Icecast.
 
