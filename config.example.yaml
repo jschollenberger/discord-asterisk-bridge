@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Repeater Bot — Example Configuration  v1.0.1
+# Repeater Bot — Example Configuration  v1.0.2
 # ─────────────────────────────────────────────────────────────────────────────
 # Copy this file to config.yaml and fill in your own values.
 # config.yaml is gitignored — never commit it, it will contain live credentials.
@@ -148,6 +148,15 @@ repeaters:
 
   - id: "uhf"
     display_name: "UHF"
+    # ── Optional per-repeater Discord binding ─────────────────────────────
+    # See the VHF block above for the full explanation of how each field falls
+    # back to the shared/global setting and what the channel_id / token
+    # arrangements do. Uncomment to give UHF its own voice/activity channels or
+    # run it as a dedicated "satellite" application.
+    # discord:
+    #   channel_id: 0            # voice channel for this repeater
+    #   activity_channel_id: 0   # text channel for this repeater's activity
+    #   token: ""                # dedicated app token (satellite mode)
     frequency_mhz: 448.700
     offset_mhz: -5.000
     pl_hz: 100.0
