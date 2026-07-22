@@ -484,6 +484,7 @@ class RepeaterAudioClient:
         except IndexError:
             if self._pause_pending:
                 self._pause_pending = False
+                log.debug(f"SIP [{self.extension}]: playback buffer drained — requesting pause")
                 if self._on_drained is not None:
                     try:
                         self._on_drained()
@@ -807,9 +808,7 @@ class RepeaterAudioClient:
                     if frames_received == 0:
                         log.debug(f"SIP [{self.extension}]: first RX audio frame received")
                     frames_received += 1
-                    if self._on_transmission is not None or self._on_speaking_change is not None:
-                        self._update_vad(pcm_8k_mono)
-                    self._buffer.append(self._decode(pcm_8k_mono))
+                    self._ingest_rx_frame(pcm_8k_mono)
         finally:
             connected_secs = time.time() - connected_at
             log.info(
@@ -836,6 +835,31 @@ class RepeaterAudioClient:
             if self._running:
                 log.debug(f"SIP [{self.extension}]: settling {TEARDOWN_SETTLE_SECONDS}s before reconnect")
                 time.sleep(TEARDOWN_SETTLE_SECONDS)
+
+    def _ingest_rx_frame(self, pcm_8k_mono: bytes) -> None:
+        """
+        Handle one received 8kHz-mono RTP frame: run VAD (if wired), resample
+        to Discord's 48kHz stereo, and enqueue it for playback.
+
+        Frames are dropped from the playback buffer once VAD has declared
+        end-of-transmission (_pause_pending). AllStar's phone-mode call streams
+        CONTINUOUS RTP — ~50 fps of silence between overs, confirmed live at
+        49.998 fps over a 45-minute idle session — so if we kept enqueueing,
+        the player would drain and refill at the same rate, the buffer would
+        never reach empty, read_frame()'s on_drained → vc.pause() would never
+        fire, and Discord's "speaking" indicator would stay lit for the rest of
+        the session after the very first over. Dropping the post-over silence
+        lets the buffered tail drain and the pause fire; the next over's VAD
+        resume flush_buffer()s the stale silence anyway.
+
+        We still resample every frame (even the dropped ones) so audioop.ratecv
+        keeps continuous state and there's no click at the next resume.
+        """
+        if self._on_transmission is not None or self._on_speaking_change is not None:
+            self._update_vad(pcm_8k_mono)
+        frame_48k = self._decode(pcm_8k_mono)
+        if not self._pause_pending:
+            self._buffer.append(frame_48k)
 
     # ── Codec ─────────────────────────────────────────────────────────────────
 
@@ -901,6 +925,7 @@ class RepeaterAudioClient:
             if not self._voice_active:
                 self._voice_active      = True
                 self._activity_start_ts = time.time()
+                log.debug(f"SIP [{self.extension}]: VAD start-of-transmission (rms={rms})")
                 if self.record_transmissions:
                     self._recording_frames = []
                 if self._on_speaking_change is not None:
@@ -931,6 +956,7 @@ class RepeaterAudioClient:
         # silence we waited through before declaring it over.
         assert self._activity_start_ts is not None  # set on the voice-active edge above
         duration = (time.time() - self._activity_start_ts) - self._vad_hangover_seconds
+        log.debug(f"SIP [{self.extension}]: VAD end-of-transmission after {duration:.1f}s — pause pending")
         self._voice_active      = False
         self._activity_start_ts = None
         self._silence_run       = 0

@@ -716,6 +716,7 @@ def _make_on_speaking_change(rpt_id: str):
                 if client is not None:
                     client.flush_buffer()   # resume at real time, not 2s behind
                 vc.resume()
+                log.debug(f"Playback resumed [{rpt_id}] — transmission started")
             # False edge: intentionally no vc.pause() here — deferred to
             # on_drained so the buffered tail plays out first.
         except Exception:
@@ -739,6 +740,7 @@ def _make_on_drained(rpt_id: str):
         try:
             if vc.is_playing():
                 vc.pause()
+                log.debug(f"Playback paused [{rpt_id}] — transmission ended (buffer drained)")
         except Exception:
             log.debug(f"drained-pause failed [{rpt_id}]", exc_info=True)
     return _callback
