@@ -1361,7 +1361,9 @@ def _status_embed(guild_id: int) -> discord.Embed:
         if r.allstar_node and r.ami:
             linked = node_links.get(r.id)
             if linked:
-                links = ", ".join(f"`{n}`" for n in sorted(linked, key=int))
+                # Numeric nodes first (in numeric order), then any named peers.
+                order = sorted(linked, key=lambda n: (0, int(n)) if n.isdigit() else (1, n))
+                links = ", ".join(f"`{n}`" for n in order)
             elif r.id in node_links:
                 links = "none"
             else:

@@ -51,13 +51,16 @@ def test_follows_no_output_is_empty_not_error():
     assert out == ""
 
 
-_NODES = "************ CONNECTED NODES ************\nT1999, T50719, TDISCORD, R53209"
+# Includes a 7-digit private node and a named peer, which must NOT be dropped.
+_NODES = "********* CONNECTED NODES *********\nT1999, T50719, TDISCORD, R53209, T2000123, TPHONE"
 
 
-def test_parse_nodes_filters_own_nonnumeric_and_hidden():
-    # own node and non-numeric (DISCORD) always excluded; R/T prefixes stripped.
-    assert _parse_nodes(_NODES, own_node="50420") == {"1999", "50719", "53209"}
+def test_parse_nodes_keeps_all_but_own_discord_and_hidden():
+    # Only own node and the bot's own DISCORD entry are excluded by default;
+    # everything else is kept regardless of format (7-digit private, named peer).
+    assert _parse_nodes(_NODES, own_node="50420") == {"1999", "50719", "53209", "2000123", "PHONE"}
     # hidden nodes (e.g. internal EchoLink 1999) additionally excluded.
-    assert _parse_nodes(_NODES, own_node="50420", hidden=frozenset({"1999"})) == {"50719", "53209"}
+    assert _parse_nodes(_NODES, own_node="50420", hidden=frozenset({"1999"})) == {
+        "50719", "53209", "2000123", "PHONE"}
     # own node is dropped even when present in the list.
     assert _parse_nodes("T50420, T50719", own_node="50420") == {"50719"}

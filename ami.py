@@ -318,7 +318,10 @@ def _parse_nodes(output: str, own_node: str, hidden: frozenset[str] = frozenset(
         R = Receive-only (monitor mode — audio only, no PTT)
         L = Local (on the same Asterisk instance)
 
-    Own node, non-numeric entries, and any `hidden` node IDs are excluded.
+    Own node, the bot's own "DISCORD" SIP connection, and any `hidden` node IDs
+    are excluded. Everything else is kept regardless of format — numeric and
+    non-numeric alike — so long/private (7+ digit) nodes and named SIP peers
+    still show.
     """
     nodes: set[str] = set()
     for line in output.splitlines():
@@ -336,9 +339,11 @@ def _parse_nodes(output: str, own_node: str, hidden: frozenset[str] = frozenset(
                 node_id = part[1:].strip()
             else:
                 node_id = part
-            # Keep only valid 4-6 digit node numbers, excluding own node and
-            # any explicitly hidden nodes.
-            if (node_id.isdigit() and len(node_id) in range(4, 7)
+            # Deny-list: keep every node entry EXCEPT our own node, the bot's
+            # own "DISCORD" SIP connection, and any operator-hidden nodes. We
+            # deliberately do NOT filter by numeric format or length, so
+            # long/private nodes and named peers are not silently dropped.
+            if (node_id and node_id.upper() != "DISCORD"
                     and node_id != own_node and node_id not in hidden):
                 nodes.add(node_id)
     return nodes
