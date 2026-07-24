@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Shutdown messages were hidden behind the terminal dashboard on Ctrl-C.** The
+  Rich `Live` dashboard pins a render region to the bottom of the terminal and
+  the worker repaints it every second, so the "Shutting down…" banner and the
+  SIP-teardown logs were painted over and scrolled off-screen during discord.py's
+  ~10–15 s voice-disconnect handshake — visible only if you scrolled back, which
+  made it look like the shutdown message wasn't working. Shutdown now halts the
+  dashboard worker and tears the Live region down *first*, so the banner and
+  teardown logs print to a normal console. (#35)
+
 ## [1.1.1] — 2026-07-24
 
 Bug-fix release — correctness fixes surfaced by an end-to-end code review,
