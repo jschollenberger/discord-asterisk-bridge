@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import signal
 import sys
 import threading
 import time
@@ -3030,6 +3031,21 @@ def main() -> None:
     log.info(f"Club: {cfg.club.name} ({cfg.club.callsign})  ·  Repeaters: {[r.id for r in cfg.repeaters]}")
     log.info(f"{'─' * 60}")
 
+    # Immediate Ctrl-C feedback. discord.py's own graceful shutdown — the voice
+    # disconnect handshake, up to ~15s — runs before main()'s finally below, so
+    # without this the console sits silent after Ctrl-C and you can't tell it
+    # registered. Print once, then re-raise so discord.py still tears down
+    # cleanly (this is Python's default SIGINT behavior, just with a line first).
+    _shutdown_announced = False
+    def _on_sigint(_signum, _frame):
+        nonlocal _shutdown_announced
+        if not _shutdown_announced:
+            _shutdown_announced = True
+            console.print("\n[yellow]⏻ Shutting down — closing voice and SIP "
+                          "connections (this can take ~10–15s)…[/yellow]")
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGINT, _on_sigint)
+
     stop = threading.Event()
     with Live(build_dashboard(), console=console, refresh_per_second=0.5, screen=False) as live:
         worker = threading.Thread(target=_dashboard_worker, args=(live, stop), daemon=True)
@@ -3050,6 +3066,7 @@ def main() -> None:
                 except KeyboardInterrupt:
                     pass
         finally:
+            log.info("Shutting down — stopping SIP monitors…")
             stop.set()
             _stop_monitors()
 

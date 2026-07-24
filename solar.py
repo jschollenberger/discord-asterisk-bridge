@@ -25,9 +25,12 @@ returns lookup data and the bot owns the presentation.
 """
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 
 import aiohttp
+
+log = logging.getLogger("k2br.solar")
 
 SOLAR_URL = "https://www.hamqsl.com/solarxml.php"
 
@@ -37,10 +40,27 @@ async def fetch_solar() -> dict:
     async with aiohttp.ClientSession() as s:
         async with s.get(SOLAR_URL, timeout=aiohttp.ClientTimeout(total=12)) as r:
             text = await r.text()
+    return _parse_solar_xml(text)
 
+
+def _parse_solar_xml(text: str) -> dict:
+    """
+    Parse hamqsl.com's solar XML into the field dict the /solar embed renders.
+
+    hamqsl nests every field under ``<solar><solardata>…`` — there is no
+    RSS-style ``<item>`` wrapper. We locate ``<solardata>`` first: the previous
+    code looked for ``<item>``, never matched, fell back to the document root,
+    and so returned "N/A" for every field. ``<item>`` is kept as a legacy
+    fallback, then the root, so a future format change degrades to N/A instead
+    of raising.
+    """
     root = ET.fromstring(text)
-    item = root.find(".//item")
+    item = root.find(".//solardata")
     if item is None:
+        item = root.find(".//item")
+    if item is None:
+        log.warning("solar feed had no <solardata> element — every field will be "
+                    "N/A; hamqsl.com's XML format may have changed")
         item = root
 
     def g(tag: str) -> str:
@@ -62,7 +82,7 @@ async def fetch_solar() -> dict:
         val  = ph.text.strip() if ph.text else "N/A"
         vhf_lines.append(f"**{name}** ({loc}): {val}")
 
-    return {
+    result = {
         "solar_flux":  g("solarflux"),
         "a_index":     g("aindex"),
         "k_index":     g("kindex"),
@@ -75,3 +95,6 @@ async def fetch_solar() -> dict:
         "bands_night": bands_night,
         "vhf":         vhf_lines,
     }
+    log.debug(f"solar parsed: SFI={result['solar_flux']} K={result['k_index']} "
+              f"bands_day={len(bands_day)} updated={result['updated']!r}")
+    return result
