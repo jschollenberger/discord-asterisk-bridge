@@ -121,6 +121,10 @@ _bot_started: float = datetime.now(timezone.utc).timestamp()
 _global_cmds_purged: bool = False   # see on_ready — one-shot stale-command purge
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
+# Voice-channel listeners: (guild_id, member_id) → unix join time, so a leave
+# can report how long they were tuned in. Logged to console + file only.
+_voice_listeners: dict[tuple[int, int], float] = {}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Rich Console & Logging
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1598,6 +1602,7 @@ class ControlPanelView(discord.ui.View):
                     f"<#{rpt.discord.channel_id}>{state} — join that channel to listen.")
         gs = get_state(ix.guild.id)
         gs.preset = preset_id
+        await _update_presence(rpt)
         vc = ix.guild.voice_client
         if vc and (vc.is_playing() or vc.is_paused()):
             vc.stop()
@@ -1731,6 +1736,23 @@ async def on_interaction(interaction: discord.Interaction) -> None:
         cmd_name = data.get("name", "?")
         log.debug(f"AUTOCOMPLETE  /{cmd_name}  ·  {user}  ·  [{guild}]")
 
+
+async def _update_presence(rpt) -> None:
+    """
+    Reflect the currently-broadcast repeater in the bot's Discord presence —
+    shows as "Broadcasting <repeater>" under the bot's name. Best-effort: a
+    presence update must never disrupt streaming, so failures are swallowed.
+    """
+    if rpt is not None:
+        label = f"{rpt.display_name} {rpt.frequency_mhz:.3f} MHz"
+    else:
+        label = f"{cfg.club.callsign} on AllStar"
+    try:
+        await bot.change_presence(activity=discord.CustomActivity(name=f"Broadcasting {label}"))
+    except Exception:
+        log.debug("Presence update failed", exc_info=True)
+
+
 @bot.event
 async def on_ready():
     global _loop
@@ -1770,12 +1792,7 @@ async def on_ready():
              f"QRZ: {'configured' if _qrz else 'not configured'}  ·  "
              f"Activity channel: {cfg.activity.channel_id or 'none'}")
 
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.listening,
-            name=f"{cfg.club.callsign} on AllStar"
-        )
-    )
+    await _update_presence(cfg.repeater_by_id(cfg.default_preset))
 
     for guild in bot.guilds:
         get_state(guild.id)
@@ -1846,6 +1863,31 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
         pass
 
 
+def _log_listener_change(
+    member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+) -> None:
+    """
+    Log a human listener joining/leaving the voice channel the bot is streaming
+    into — console + log file only (no Discord posting), with how long they
+    stayed. Ignores bots (including our own satellites) and mute/deafen changes.
+    """
+    if member.bot:
+        return
+    guild  = member.guild
+    vc     = guild.voice_client
+    bot_ch = vc.channel if (vc and vc.is_connected()) else None
+    if bot_ch is None:
+        return
+    key = (guild.id, member.id)
+    if after.channel == bot_ch and before.channel != bot_ch:
+        _voice_listeners[key] = time.time()
+        log.info(f"🎧 {member.display_name} joined voice '{bot_ch.name}' [{guild.name}]")
+    elif before.channel == bot_ch and after.channel != bot_ch:
+        joined_at = _voice_listeners.pop(key, None)
+        heard = f" — listened {_fmt_uptime(joined_at)}" if joined_at else ""
+        log.info(f"🎧 {member.display_name} left voice '{bot_ch.name}'{heard} [{guild.name}]")
+
+
 @bot.event
 async def on_voice_state_update(
     member: discord.Member,
@@ -1853,18 +1895,18 @@ async def on_voice_state_update(
     after:  discord.VoiceState,
 ) -> None:
     """
-    Detect when the bot leaves a voice channel.
+    Track voice-channel changes:
+      - the bot's own leave (distinguishing a true disconnect from a transient
+        WebSocket reconnect), and
+      - other people joining/leaving the channel the bot streams into
+        (see _log_listener_change).
 
-    discord.py fires this with after.channel=None during both:
-      (a) true disconnects (admin kick, /leave), and
-      (b) transient WebSocket 1001 reconnects — where the voice socket drops
-          briefly but discord.py internally reconnects and resumes audio playback.
-
-    We distinguish them by waiting one second and then checking whether the
-    bot's voice_client is still connected.  If it is, this was a reconnect
-    and we leave state alone.  If it isn't, it was a true disconnect.
+    For the bot's own state, discord.py fires this with after.channel=None on
+    both a true disconnect (admin kick, /leave) and a transient reconnect; we
+    distinguish them by waiting briefly and re-checking the voice client.
     """
     if member != bot.user:
+        _log_listener_change(member, before, after)
         return
     if not (before.channel and after.channel is None):
         return
@@ -2065,6 +2107,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
 
     gs        = get_state(ctx.guild.id)
     gs.preset = preset_id
+    await _update_presence(rpt)
     vc        = ctx.voice_client
     label     = rpt.display_name
     freq      = f" ({rpt.frequency_mhz:.3f} MHz)"
