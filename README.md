@@ -95,9 +95,15 @@ If you don't already have a bot application, create one at
    server, and authorize. (You need **Manage Server** on that server to add a
    bot to it.)
 
-That's the complete list — the bot doesn't pin messages, add reactions,
-kick/ban, or manage roles, so it needs none of those permissions. Keep its role
-scoped to the six above rather than granting Administrator.
+That's the core list — the bot doesn't pin messages, add reactions, kick/ban,
+or manage roles, so it needs none of those permissions. Keep its role scoped to
+the six above rather than granting Administrator.
+
+> **Optional — Set Voice Channel Status:** grant this one extra permission and
+> the bot keeps the voice channel's *status* line (shown under the channel name
+> in the channel list) reflecting the live repeater — e.g. `🔴 On the air · VHF
+> 146.745` or `📻 VHF 146.745`. Without it, everything else works and the
+> feature simply stays off (a single warning is logged at startup).
 
 > **Satellite bots** (streaming a second repeater into a second channel
 > simultaneously — see [Multiple repeaters, multiple
