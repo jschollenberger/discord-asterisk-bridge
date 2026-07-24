@@ -126,6 +126,12 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 # can report how long they were tuned in. Logged to console + file only.
 _voice_listeners: dict[tuple[int, int], float] = {}
 
+# Voice-channel status (the small line under the channel name): channel_id →
+# the status text we last set, so channel_status_task only edits on a change.
+# _channel_status_supported flips False if the bot lacks the permission.
+_channel_status: dict[int, str] = {}
+_channel_status_supported: bool = True
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Rich Console & Logging
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1841,6 +1847,8 @@ async def on_ready():
         watchdog.start()
     if not state_sync.is_running():
         state_sync.start()
+    if not channel_status_task.is_running():
+        channel_status_task.start()
     if cfg.asterisk.enabled and cfg.has_activity_channels():
         if not activity_feed.is_running():
             activity_feed.start()
@@ -2984,11 +2992,83 @@ async def tx_lock_watch():
             await _post_tx_event(rpt_id, lock.callsign, "released")
 
 
+def _voice_status_text(rpt, client) -> str:
+    """The voice-channel status line for the repeater being streamed into it."""
+    if rpt is None:
+        return "📻 Repeater stream"
+    name = f"{rpt.display_name} {rpt.frequency_mhz:.3f}"
+    if client is None:
+        return f"📻 {name}"
+    state = client.state.name
+    if state == "RECONNECTING":
+        return f"🟠 {name} · reconnecting"
+    if state != "CONNECTED":
+        return f"⚫ {name} · offline"
+    if getattr(client, "voice_active", False):
+        return f"🔴 On the air · {name}"
+    return f"📻 {name}"
+
+
+@tasks.loop(seconds=10)
+async def channel_status_task():
+    """
+    Keep each occupied voice channel's Discord *status* (the small line under
+    the channel name) reflecting what the bot is streaming there: the repeater,
+    its SIP state, and whether someone's on the air right now.
+
+    Rate-safe by design — a slow loop that samples state (so rapid overs can't
+    cause rapid edits) and only edits a channel when its desired status
+    actually changes; it also clears the status on channels the bot has left.
+    Requires the "Set Voice Channel Status" permission; if that's missing the
+    first edit fails with Forbidden and the feature disables itself (logged
+    once) rather than retrying forever.
+    """
+    global _channel_status_supported
+    if not _channel_status_supported:
+        return
+
+    desired: dict[int, tuple[discord.VoiceChannel, str]] = {}
+    for guild in bot.guilds:
+        vc = guild.voice_client
+        ch = getattr(vc, "channel", None)
+        if vc and vc.is_connected() and isinstance(ch, discord.VoiceChannel):
+            gs     = get_state(guild.id)
+            rpt    = cfg.repeater_by_id(gs.preset)
+            client = _monitor_clients.get(gs.preset)
+            desired[ch.id] = (ch, _voice_status_text(rpt, client))
+
+    for ch_id, (channel, text) in desired.items():
+        if _channel_status.get(ch_id) == text:
+            continue
+        try:
+            await channel.edit(status=text)
+            _channel_status[ch_id] = text
+        except discord.Forbidden:
+            _channel_status_supported = False
+            log.warning("Voice channel status disabled — the bot lacks the "
+                        "'Set Voice Channel Status' permission. Grant it to show "
+                        "live repeater status under the channel name.")
+            return
+        except Exception:
+            log.debug(f"Voice channel status update failed [{ch_id}]", exc_info=True)
+
+    # Clear the status on channels we set before but no longer occupy.
+    for ch_id in [c for c in _channel_status if c not in desired]:
+        channel = bot.get_channel(ch_id)
+        if isinstance(channel, discord.VoiceChannel):
+            try:
+                await channel.edit(status=None)
+            except Exception:
+                log.debug(f"Voice channel status clear failed [{ch_id}]", exc_info=True)
+        _channel_status.pop(ch_id, None)
+
+
 @watchdog.before_loop
 @state_sync.before_loop
 @activity_feed.before_loop
 @sip_health_watch.before_loop
 @tx_lock_watch.before_loop
+@channel_status_task.before_loop
 async def _wait_ready():
     await bot.wait_until_ready()
 
