@@ -4,6 +4,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 import repeater_audio as ra
 
 
@@ -190,3 +192,73 @@ def test_await_registration_aborts_when_stopping():
         def get_status(self): return _Status('REGISTERING')
 
     assert c._await_registration(Phone()) is False
+
+
+# ── _connect_and_stream teardown: phone.stop() must run on EVERY exit ──────────
+# Regression guard: phone.start() binds the local SIP socket and spawns threads.
+# rfcvoip binds without SO_REUSEADDR, so a phone that starts but is then
+# abandoned without stop() leaks the bound local port — and the next reconnect's
+# start() fails to rebind (EADDRINUSE), wedging the monitor. An earlier version
+# wrapped only the RX loop in try/finally, so a failed registration or an
+# unanswered/failed call returned/raised past it and leaked. The finally now
+# spans the whole session.
+
+def _session_client(monkeypatch) -> ra.RepeaterAudioClient:
+    """Bare client wired with just enough state to drive _connect_and_stream(),
+    with the rfcvoip debug bridge and the post-teardown settle sleep stubbed
+    out so the test neither imports SIP internals nor waits on the settle."""
+    c = _bare_client()
+    c.password        = "secret"
+    c.local_ip        = "127.0.0.1"
+    c.local_sip_port  = 5060
+    c.rtp_port_low    = 10000
+    c.rtp_port_high   = 11999
+    c.sip_debug_verbose = False
+    c._state          = ra.ConnectionState.CONNECTING
+    c._state_since    = time.time()
+    c._running        = True
+    monkeypatch.setattr(ra, "_bridge_rfcvoip_debug", lambda *a, **k: None)
+    monkeypatch.setattr(ra, "TEARDOWN_SETTLE_SECONDS", 0.0)
+    return c
+
+
+def test_connect_stops_phone_when_registration_fails(monkeypatch):
+    """Started OK but never registered → must still stop the phone."""
+    c = _session_client(monkeypatch)
+    created = []
+
+    class FakePhone:
+        def __init__(self): self.stopped = 0
+        def start(self): pass
+        def stop(self, *a, **k): self.stopped += 1
+        def get_status(self): return _Status("FAILED")
+
+    def _factory(*a, **k):
+        p = FakePhone(); created.append(p); return p
+    monkeypatch.setattr("rfcvoip.VoIP.VoIPPhone", _factory)
+
+    c._connect_and_stream()   # returns normally on a failed registration
+    assert created and created[0].stopped == 1
+
+
+def test_connect_stops_phone_when_call_setup_raises(monkeypatch):
+    """Any failure after a successful start (a raising call(), the answer
+    timeout, an RX error) runs the same teardown — the phone is always stopped
+    even though the exception propagates to _run() for its reconnect backoff."""
+    c = _session_client(monkeypatch)
+    created = []
+
+    class FakePhone:
+        def __init__(self): self.stopped = 0
+        def start(self): pass
+        def stop(self, *a, **k): self.stopped += 1
+        def get_status(self): return _Status("REGISTERED")
+        def call(self, ext): raise RuntimeError("INVITE failed")
+
+    def _factory(*a, **k):
+        p = FakePhone(); created.append(p); return p
+    monkeypatch.setattr("rfcvoip.VoIP.VoIPPhone", _factory)
+
+    with pytest.raises(RuntimeError):
+        c._connect_and_stream()
+    assert created and created[0].stopped == 1

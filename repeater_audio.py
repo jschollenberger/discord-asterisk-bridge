@@ -753,55 +753,62 @@ class RepeaterAudioClient:
         # instead: proceed the moment registration is confirmed, and fail
         # fast with a clear reason when it won't succeed.
         log.info(f"SIP registration initiated as '{self.username}' on {self.host}:{self.port}")
-        if not self._await_registration(phone):
-            return   # outer loop applies its normal reconnect backoff
 
-        if not self._running:
-            log.debug(f"SIP [{self.extension}]: stop() requested during registration wait — aborting")
-            phone.stop()
-            return
-
-        call = phone.call(self.extension)
-        log.info(f"SIP calling extension {self.extension!r}…")
-        log.debug(f"SIP [{self.extension}]: initial call.state={call.state!r}")
-
-        # Wait up to 15 s for Asterisk to answer
-        deadline    = time.time() + 15.0
-        last_logged_state = call.state
-        while time.time() < deadline:
-            if not self._running:
-                log.debug(f"SIP [{self.extension}]: stop() requested while waiting for answer — hanging up")
-                try:
-                    call.hangup()
-                except Exception:
-                    log.debug(f"SIP [{self.extension}]: call.hangup() during abort raised", exc_info=True)
-                phone.stop()
-                return
-            if call.state != last_logged_state:
-                log.debug(f"SIP [{self.extension}]: call.state {last_logged_state!r} → {call.state!r}")
-                last_logged_state = call.state
-            if call.state == CallState.ANSWERED:
-                break
-            time.sleep(0.1)
-        else:
-            raise TimeoutError(
-                f"Call to extension {self.extension!r} not answered within 15 s "
-                f"(final state: {call.state})"
-            )
-
-        self._set_state(ConnectionState.CONNECTED)
-        self._call = call   # send_frame() checks this; set only once answered
-        log.info(f"SIP call answered — streaming node {self.extension}")
-
-        # ── RX loop ──────────────────────────────────────────────────────────
-        # Prefer the phone's own frame-size calculation over our hardcoded
-        # constant — it accounts for whatever public format was negotiated,
-        # per rfcvoip's docs (relevant if this ever runs a wideband codec).
-        frame_bytes = getattr(call, "audio_frame_size", lambda: RTP_FRAME_BYTES)()
-        log.debug(f"SIP [{self.extension}]: RX loop starting, frame_bytes={frame_bytes}")
+        # From here on the phone is live: phone.start() has bound the local SIP
+        # socket and spawned its register/receive threads. EVERY exit path below
+        # must stop it, or that bound local port leaks — rfcvoip binds without
+        # SO_REUSEADDR, so the next reconnect's phone.start() then fails to
+        # rebind (OSError 10048/EADDRINUSE) and this monitor wedges until the
+        # process restarts. rfcvoip only self-cleans when start() itself raises;
+        # a *successful* start followed by a failed registration or an
+        # unanswered call — both early exits here — does not. Hence the outer
+        # try/finally spans the whole session, not just the RX loop: an earlier
+        # version wrapped only the RX loop, so those two failure paths leaked.
+        call = None
+        connected_at: Optional[float] = None
         frames_received = 0
-        connected_at     = time.time()
         try:
+            if not self._await_registration(phone):
+                return   # outer loop applies its normal reconnect backoff
+
+            if not self._running:
+                log.debug(f"SIP [{self.extension}]: stop() requested during registration wait — aborting")
+                return
+
+            call = phone.call(self.extension)
+            log.info(f"SIP calling extension {self.extension!r}…")
+            log.debug(f"SIP [{self.extension}]: initial call.state={call.state!r}")
+
+            # Wait up to 15 s for Asterisk to answer
+            deadline    = time.time() + 15.0
+            last_logged_state = call.state
+            while time.time() < deadline:
+                if not self._running:
+                    log.debug(f"SIP [{self.extension}]: stop() requested while waiting for answer — hanging up")
+                    return
+                if call.state != last_logged_state:
+                    log.debug(f"SIP [{self.extension}]: call.state {last_logged_state!r} → {call.state!r}")
+                    last_logged_state = call.state
+                if call.state == CallState.ANSWERED:
+                    break
+                time.sleep(0.1)
+            else:
+                raise TimeoutError(
+                    f"Call to extension {self.extension!r} not answered within 15 s "
+                    f"(final state: {call.state})"
+                )
+
+            self._set_state(ConnectionState.CONNECTED)
+            self._call = call   # send_frame() checks this; set only once answered
+            log.info(f"SIP call answered — streaming node {self.extension}")
+
+            # ── RX loop ──────────────────────────────────────────────────────
+            # Prefer the phone's own frame-size calculation over our hardcoded
+            # constant — it accounts for whatever public format was negotiated,
+            # per rfcvoip's docs (relevant if this ever runs a wideband codec).
+            frame_bytes = getattr(call, "audio_frame_size", lambda: RTP_FRAME_BYTES)()
+            log.debug(f"SIP [{self.extension}]: RX loop starting, frame_bytes={frame_bytes}")
+            connected_at = time.time()
             while self._running and call.state == CallState.ANSWERED:
                 pcm_8k_mono = call.read_audio(frame_bytes, blocking=True)
                 if pcm_8k_mono:
@@ -810,18 +817,20 @@ class RepeaterAudioClient:
                     frames_received += 1
                     self._ingest_rx_frame(pcm_8k_mono)
         finally:
-            connected_secs = time.time() - connected_at
-            log.info(
-                f"SIP call ended [{self.extension}] — was connected {connected_secs:.1f}s, "
-                f"received {frames_received} audio frames "
-                f"(final call.state={call.state!r}, self._running={self._running})"
-            )
+            if connected_at is not None:
+                connected_secs = time.time() - connected_at
+                log.info(
+                    f"SIP call ended [{self.extension}] — was connected {connected_secs:.1f}s, "
+                    f"received {frames_received} audio frames "
+                    f"(final call.state={getattr(call, 'state', None)!r}, self._running={self._running})"
+                )
             self._call = None   # stop send_frame() from sending to a dead call
             self._set_state(ConnectionState.IDLE)
-            try:
-                call.hangup()
-            except Exception:
-                log.debug(f"SIP [{self.extension}]: call.hangup() during cleanup raised", exc_info=True)
+            if call is not None:
+                try:
+                    call.hangup()
+                except Exception:
+                    log.debug(f"SIP [{self.extension}]: call.hangup() during cleanup raised", exc_info=True)
             try:
                 phone.stop()
             except Exception:

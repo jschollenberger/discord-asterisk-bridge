@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A SIP monitor could wedge itself after a failed registration or unanswered
+  call.** `_connect_and_stream()` wrapped only the RX loop in `try/finally`, so
+  two early exits after a successful `phone.start()` — a failed/timed-out
+  registration and an unanswered call — never called `phone.stop()`. That
+  leaked the bound local SIP port (rfcvoip binds without `SO_REUSEADDR`), so the
+  next reconnect failed to rebind with `OSError` 10048/`EADDRINUSE` and looped
+  until the process restarted. A single registration hiccup at boot was enough
+  to trigger it. The teardown now spans the whole session, running on every exit
+  path. (#31)
 - **Control-panel "▶ Start" button could raise `AttributeError`.** It read
   `ix.member`, which `discord.Interaction` does not expose (there is no such
   attribute and no `__getattr__` fallback), so detecting the presser's voice
