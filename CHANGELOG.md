@@ -14,6 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-07-24
+
+Feature release — new operator-facing conveniences plus a command
+consolidation and rename.
+
+### Added
+- **Voice channel status** — the voice channel's status line (shown under its
+  name in the channel list) now reflects the live repeater: on-air state,
+  repeater/frequency, and SIP health (e.g. `🔴 On the air · VHF 146.745`).
+  Requires the optional "Set Voice Channel Status" permission; degrades
+  gracefully without it. (#27)
+- **Operator commands are hidden from the slash picker** for members without
+  access, via per-command default permissions (map your operator role once in
+  Server Settings → Integrations). `/help` still lists them. (#28)
+- **`activity.hidden_nodes`** — node IDs to exclude from the linked-node
+  display and the link/unlink activity feed (e.g. an internal EchoLink node). (#26)
+
+### Changed
+- **`/status` → `/repeater-status`** and **`/info` → `/repeater-info`.** The
+  status command now also shows each repeater's linked AllStar nodes, so the
+  separate **`/node-status` command is removed** (folded in). (#26)
+
+### Fixed
+- Linked-node parsing no longer drops legitimate 7+ digit private nodes or
+  named SIP peers — it now excludes only the repeater's own node, the bot's
+  own DISCORD connection, and `hidden_nodes`. (#26)
+
 ## [1.0.4] — 2026-07-23
 
 Bug-fix and small-feature release.
@@ -142,7 +169,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.1...v1.0.2
