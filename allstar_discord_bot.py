@@ -38,10 +38,11 @@ import sys
 import threading
 import time
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -676,6 +677,12 @@ def _clear_audio_client(guild_id: int) -> None:
     # the voice channel stops playback, not monitoring/recording.
 
 
+def _vc(vc: object) -> Optional[discord.VoiceClient]:
+    """Narrow a guild/ctx `.voice_client` (typed as the VoiceProtocol ABC) to
+    the concrete VoiceClient this bot always uses, or None."""
+    return vc if isinstance(vc, discord.VoiceClient) else None
+
+
 def _playback_vc_for(rpt_id: str) -> Optional[discord.VoiceClient]:
     """
     Return the voice connection currently *playing* this repeater, or None
@@ -689,12 +696,15 @@ def _playback_vc_for(rpt_id: str) -> Optional[discord.VoiceClient]:
     sat = _satellites.get(rpt_id)
     if sat is not None:
         for g in sat.guilds:
-            if g.voice_client is not None:
-                return g.voice_client
+            vc = _vc(g.voice_client)
+            if vc is not None:
+                return vc
         return None
     for g in bot.guilds:
-        if get_state(g.id).preset == rpt_id and g.voice_client is not None:
-            return g.voice_client
+        if get_state(g.id).preset == rpt_id:
+            vc = _vc(g.voice_client)
+            if vc is not None:
+                return vc
     return None
 
 
@@ -782,7 +792,8 @@ def _activity_channel(rpt) -> Optional[discord.abc.Messageable]:
     permissions simple.
     """
     ch_id = cfg.activity_channel_id_for(rpt)
-    return bot.get_channel(ch_id) if ch_id else None
+    ch = bot.get_channel(ch_id) if ch_id else None
+    return ch if isinstance(ch, discord.abc.Messageable) else None
 
 
 async def _post_transmission_activity(rpt, duration: float, recording: Optional[bytes] = None) -> None:
@@ -1010,7 +1021,7 @@ def _harden_voice_recv_decoder() -> None:
                 pass
             return None        # router treats None as "nothing to deliver"
 
-    PacketDecoder.pop_data = _safe_pop_data
+    PacketDecoder.pop_data = _safe_pop_data  # type: ignore[method-assign]  # deliberate monkeypatch — see above
     _vr_decoder_hardened = True
     log.info("TX: voice_recv decoder hardened (per-packet error isolation).")
 
@@ -1105,14 +1116,14 @@ def _make_tx_listen_after(guild_id: int, attempt: int = 0):
 async def _reattach_tx_sink(guild_id: int, attempt: int) -> None:
     """Re-arm TX receive after a crash — see _make_tx_listen_after()."""
     guild = bot.get_guild(guild_id)
-    vc = guild.voice_client if guild else None
+    vc = _vc(guild.voice_client) if guild else None
     voice_recv_cls = _get_voice_recv_client_cls()
     if vc is None or voice_recv_cls is None or not isinstance(vc, voice_recv_cls):
         return
-    if not vc.is_connected() or vc.is_listening():
+    if not vc.is_connected() or vc.is_listening():  # type: ignore[attr-defined]  # voice_recv client (isinstance-checked above)
         return
     try:
-        vc.listen(_make_tx_sink(guild_id), after=_make_tx_listen_after(guild_id, attempt))
+        vc.listen(_make_tx_sink(guild_id), after=_make_tx_listen_after(guild_id, attempt))  # type: ignore[attr-defined]  # voice_recv client method
         log.info(f"TX: receive pipeline reattached [{guild_id}]")
     except Exception as exc:
         log.error(f"TX: failed to reattach receive pipeline [{guild_id}]: {exc}")
@@ -1225,7 +1236,7 @@ class SatelliteBot(discord.Client):
             )
             return
         try:
-            vc = ch.guild.voice_client
+            vc = _vc(ch.guild.voice_client)
             if vc is not None and not vc.is_connected():
                 # Stale client from a dropped session — clear it out so we
                 # do a genuinely fresh connect instead of operating on a
@@ -1499,7 +1510,7 @@ class ControlPanelView(discord.ui.View):
             return True
         return False
 
-    async def _refresh(self, ix: discord.Interaction) -> None:
+    async def _refresh_panel(self, ix: discord.Interaction) -> None:
         """
         Update the panel embed after a deferred component interaction.
 
@@ -1532,9 +1543,10 @@ class ControlPanelView(discord.ui.View):
         assert ix.guild is not None  # panel only exists in a guild
         log.debug(f"btn_start invoked by {ix.user} [{ix.guild}]")
         if await self._deny(ix): return
-        # Use ix.member (always a Member in guild contexts) rather than ix.user
-        # which can return a plain User with no .voice attribute.
-        voice_channel = ix.member.voice.channel if (ix.member and ix.member.voice) else None
+        # ix.user is Member in guild contexts (Interaction has no .member attribute);
+        # narrow to Member so .voice is available (a plain User has none).
+        member = ix.user if isinstance(ix.user, discord.Member) else None
+        voice_channel = member.voice.channel if (member and member.voice) else None
         if voice_channel is None:
             await ix.response.send_message("❌ Join a voice channel first.", ephemeral=True)
             return
@@ -1549,7 +1561,7 @@ class ControlPanelView(discord.ui.View):
                 await self._error(ix, msg)
             else:
                 log.info(f"Panel start: {msg}")
-                await self._refresh(ix)
+                await self._refresh_panel(ix)
         except Exception as exc:
             log.error(f"btn_start failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Failed to start stream: `{exc}`")
@@ -1564,7 +1576,7 @@ class ControlPanelView(discord.ui.View):
             log.error(f"btn_stop: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
             return
         try:
-            vc = ix.guild.voice_client
+            vc = _vc(ix.guild.voice_client)
             if vc:
                 vc.stop()
                 await vc.disconnect()
@@ -1574,7 +1586,7 @@ class ControlPanelView(discord.ui.View):
             gs.channel    = "—"
             _clear_audio_client(ix.guild.id)
             log.info(f"Stream stopped via panel [{ix.guild.name}]")
-            await self._refresh(ix)
+            await self._refresh_panel(ix)
         except Exception as exc:
             log.error(f"btn_stop failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Failed to stop stream: `{exc}`")
@@ -1583,7 +1595,7 @@ class ControlPanelView(discord.ui.View):
     async def btn_reconnect(self, ix: discord.Interaction, _: discord.ui.Button):
         assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
-        vc = ix.guild.voice_client
+        vc = _vc(ix.guild.voice_client)
         if vc is None:
             await ix.response.send_message("❌ Not connected.", ephemeral=True)
             return
@@ -1599,7 +1611,7 @@ class ControlPanelView(discord.ui.View):
             _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
             # User-requested reconnect — deliberately does NOT bump gs.reconnects.
             log.info(f"Manual reconnect via panel [{ix.guild.name}]")
-            await self._refresh(ix)
+            await self._refresh_panel(ix)
         except Exception as exc:
             log.error(f"btn_reconnect failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Reconnect failed: `{exc}`")
@@ -1625,7 +1637,7 @@ class ControlPanelView(discord.ui.View):
         gs = get_state(ix.guild.id)
         gs.preset = preset_id
         await _update_presence(rpt)
-        vc = ix.guild.voice_client
+        vc = _vc(ix.guild.voice_client)
         if vc and (vc.is_playing() or vc.is_paused()):
             vc.stop()
             await asyncio.sleep(0.5)
@@ -1655,7 +1667,7 @@ class ControlPanelView(discord.ui.View):
             if note is not None:
                 await ix.followup.send(note, ephemeral=True)
                 return
-            await self._refresh(ix)
+            await self._refresh_panel(ix)
         except Exception as exc:
             log.error(f"btn_vhf failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Failed to switch to VHF: `{exc}`")
@@ -1681,7 +1693,7 @@ class ControlPanelView(discord.ui.View):
             if note is not None:
                 await ix.followup.send(note, ephemeral=True)
                 return
-            await self._refresh(ix)
+            await self._refresh_panel(ix)
         except Exception as exc:
             log.error(f"btn_uhf failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Failed to switch to UHF: `{exc}`")
@@ -1711,6 +1723,7 @@ _panel_view = ControlPanelView()
 async def _log_prefix_cmd(ctx: commands.Context) -> None:
     if ctx.interaction is not None:
         return  # slash invocation — on_interaction handles logging
+    assert ctx.command is not None  # before_invoke only fires with a resolved command
     args    = " ".join(f"{k}={v!r}" for k, v in ctx.kwargs.items())
     guild   = ctx.guild.name if ctx.guild else "DM"
     channel = getattr(ctx.channel, "name", "?")
@@ -1739,9 +1752,9 @@ async def on_interaction(interaction: discord.Interaction) -> None:
     user    = interaction.user
     guild   = interaction.guild.name if interaction.guild else "DM"
     channel = getattr(interaction.channel, "name", "?")
+    data: Mapping[str, Any] = interaction.data or {}
 
     if itype == discord.InteractionType.application_command:
-        data     = interaction.data or {}
         cmd_name = data.get("name", "unknown")
         options  = {o["name"]: o.get("value", "…") for o in data.get("options", [])}
         args     = " ".join(f"{k}={v!r}" for k, v in options.items())
@@ -1751,10 +1764,9 @@ async def on_interaction(interaction: discord.Interaction) -> None:
             f"{user} ({user.id})  ·  #{channel} [{guild}]"
         )
     elif itype == discord.InteractionType.component:
-        custom_id = (interaction.data or {}).get("custom_id", "?")
+        custom_id = data.get("custom_id", "?")
         log.info(f"BUTTON  {custom_id}  ·  {user} ({user.id})  ·  #{channel} [{guild}]")
     elif itype == discord.InteractionType.autocomplete:
-        data     = interaction.data or {}
         cmd_name = data.get("name", "?")
         log.debug(f"AUTOCOMPLETE  /{cmd_name}  ·  {user}  ·  [{guild}]")
 
@@ -1898,7 +1910,7 @@ def _log_listener_change(
     if member.bot:
         return
     guild  = member.guild
-    vc     = guild.voice_client
+    vc     = _vc(guild.voice_client)
     bot_ch = vc.channel if (vc and vc.is_connected()) else None
     if bot_ch is None:
         return
@@ -1942,7 +1954,7 @@ async def on_voice_state_update(
     # a transient drop rather than a real disconnect.
     await asyncio.sleep(1.5)
 
-    vc = guild.voice_client
+    vc = _vc(guild.voice_client)
     if vc and vc.is_connected():
         # Transient reconnect — discord.py already recovered; leave state alone
         log.debug(
@@ -1965,7 +1977,7 @@ async def on_voice_state_update(
 
 async def _do_join(guild: discord.Guild, channel) -> str:
     gs = get_state(guild.id)
-    vc = guild.voice_client
+    vc = _vc(guild.voice_client)
 
     # Short-circuit before doing anything if already streaming in this channel
     if vc and (vc.is_playing() or vc.is_paused()) and vc.channel == channel:
@@ -2039,6 +2051,7 @@ async def _do_join(guild: discord.Guild, channel) -> str:
 @commands.guild_only()
 async def join_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
+    assert isinstance(ctx.author, discord.Member)  # guild context → Member, not User
     if not await _has_access(ctx):
         return await ctx.send("❌ No permission.", ephemeral=True)
     if ctx.author.voice is None:
@@ -2053,7 +2066,7 @@ async def leave_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _has_access(ctx):
         return await ctx.send("❌ No permission.", ephemeral=True)
-    vc = ctx.voice_client
+    vc = _vc(ctx.voice_client)
     if vc is None:
         return await ctx.send("❌ Not in a voice channel.", ephemeral=True)
     name = vc.channel.name
@@ -2100,6 +2113,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
     - Otherwise: set the preset so the next /join or ▶ Start uses it.
     """
     assert ctx.guild is not None  # guaranteed by the @commands.guild_only() callers
+    assert isinstance(ctx.author, discord.Member)  # guild context → Member, not User
     if not await _has_access(ctx):
         await ctx.send("❌ No permission.", ephemeral=True)
         return
@@ -2132,7 +2146,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
     gs        = get_state(ctx.guild.id)
     gs.preset = preset_id
     await _update_presence(rpt)
-    vc        = ctx.voice_client
+    vc        = _vc(ctx.voice_client)
     label     = rpt.display_name
     freq      = f" ({rpt.frequency_mhz:.3f} MHz)"
 
@@ -2184,7 +2198,7 @@ async def uhf_cmd(ctx: commands.Context):
     await _switch_to_preset(ctx, "uhf")
 
 
-@bot.hybrid_command(name="stream", description="Switch to a named stream preset.")
+@bot.hybrid_command(name="stream", description="Switch to a named stream preset.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @commands.guild_only()
 @app_commands.describe(preset="Preset name — type to see options")
 async def stream_cmd(ctx: commands.Context, preset: str):
@@ -2204,7 +2218,7 @@ async def reconnect_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _has_access(ctx):
         return await ctx.send("❌ No permission.", ephemeral=True)
-    vc = ctx.voice_client
+    vc = _vc(ctx.voice_client)
     if vc is None:
         return await ctx.send("❌ Not connected. Use `/join` first.", ephemeral=True)
     await ctx.defer()
@@ -2399,7 +2413,7 @@ async def unlink_repeaters_cmd(ctx: commands.Context):
         await ctx.send(f"❌ AMI error: `{exc}`")
 
 
-@bot.hybrid_command(name="link", description="Link a repeater to an AllStar node.")
+@bot.hybrid_command(name="link", description="Link a repeater to an AllStar node.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
@@ -2432,7 +2446,7 @@ async def link_cmd(ctx: commands.Context, node: str, repeater: Optional[str] = N
         await ctx.send(f"❌ AMI error: `{exc}`")
 
 
-@bot.hybrid_command(name="unlink", description="Unlink a repeater from a specific node.")
+@bot.hybrid_command(name="unlink", description="Unlink a repeater from a specific node.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
@@ -2462,7 +2476,7 @@ async def unlink_cmd(ctx: commands.Context, node: str, repeater: Optional[str] =
         await ctx.send(f"❌ AMI error: `{exc}`")
 
 
-@bot.hybrid_command(name="unlink-all", description="Disconnect ALL links on a repeater.")
+@bot.hybrid_command(name="unlink-all", description="Disconnect ALL links on a repeater.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(repeater="Which repeater (default: this channel's repeater, else the active preset)")
@@ -2487,7 +2501,7 @@ async def unlink_all_cmd(ctx: commands.Context, repeater: Optional[str] = None):
         await ctx.send(f"❌ AMI error: `{exc}`")
 
 
-@bot.hybrid_command(name="monitor-node", description="Connect to a node in listen-only (monitor) mode.")
+@bot.hybrid_command(name="monitor-node", description="Connect to a node in listen-only (monitor) mode.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
@@ -2535,7 +2549,7 @@ async def tx_status_cmd(ctx: commands.Context):
     await ctx.send(embed=e, ephemeral=True)
 
 
-@bot.hybrid_command(name="tx-kill", description="Immediately force-release the TX lock on a repeater.")
+@bot.hybrid_command(name="tx-kill", description="Immediately force-release the TX lock on a repeater.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(repeater="Which repeater (default: this channel's repeater, else the active preset)")
@@ -2565,7 +2579,7 @@ async def tx_kill_cmd(ctx: commands.Context, repeater: Optional[str] = None):
     )
 
 
-@bot.hybrid_command(
+@bot.hybrid_command(  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
     name="repeater-cmd",
     description="Run a named HamVOIP action (e.g. time announcement) on a repeater.",
 )
@@ -2654,7 +2668,10 @@ async def _repeater_target_autocomplete(interaction: discord.Interaction, curren
         for r in cfg.repeaters if current.lower() in r.id.lower()
     ]
 
-for _cmd in (link_cmd, unlink_cmd, unlink_all_cmd, monitor_node_cmd, repeater_cmd_cmd, tx_kill_cmd):
+_repeater_arg_cmds: tuple[Any, ...] = (
+    link_cmd, unlink_cmd, unlink_all_cmd, monitor_node_cmd, repeater_cmd_cmd, tx_kill_cmd,
+)
+for _cmd in _repeater_arg_cmds:
     _cmd.autocomplete("repeater")(_repeater_target_autocomplete)
 
 
@@ -2677,7 +2694,7 @@ async def _repeater_cmd_autocomplete(interaction: discord.Interaction, current: 
 # Ham Radio Utility Commands
 # ─────────────────────────────────────────────────────────────────────────────
 
-@bot.hybrid_command(name="qrz", description="Look up a callsign on QRZ.com.")
+@bot.hybrid_command(name="qrz", description="Look up a callsign on QRZ.com.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
 @app_commands.describe(callsign="The amateur radio callsign to look up")
 async def qrz_cmd(ctx: commands.Context, callsign: str):
     if _qrz is None:
@@ -2858,7 +2875,7 @@ def _solar_embed(data: dict) -> discord.Embed:
 async def watchdog():
     """Reconnect any guild whose voice client is connected but not playing."""
     for guild in bot.guilds:
-        vc = guild.voice_client
+        vc = _vc(guild.voice_client)
         if vc and vc.is_connected() and not vc.is_playing() and not vc.is_paused():
             gs = get_state(guild.id)
             log.warning(f"Watchdog: not playing in '{guild.name}' — reconnecting…")
@@ -2893,7 +2910,7 @@ async def state_sync():
     only reflecting the Discord side.
     """
     for guild in bot.guilds:
-        vc     = guild.voice_client
+        vc     = _vc(guild.voice_client)
         gs     = get_state(guild.id)
         client = _monitor_clients.get(get_state(guild.id).preset)
         sip_connected = client is not None and client.state.name == "CONNECTED"
@@ -3037,7 +3054,7 @@ async def channel_status_task():
 
     desired: dict[int, tuple[discord.VoiceChannel, str]] = {}
     for guild in bot.guilds:
-        vc = guild.voice_client
+        vc = _vc(guild.voice_client)
         ch = getattr(vc, "channel", None)
         if vc and vc.is_connected() and isinstance(ch, discord.VoiceChannel):
             gs     = get_state(guild.id)
