@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-07-24
+
+Bug-fix release.
+
 ### Fixed
 - **Shutdown messages were hidden behind the terminal dashboard on Ctrl-C.** The
   Rich `Live` dashboard pins a render region to the bottom of the terminal and
@@ -216,7 +220,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.3...v1.0.4
