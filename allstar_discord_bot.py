@@ -673,6 +673,16 @@ def _clear_audio_client(guild_id: int) -> None:
     if lock is not None:
         _tx_release_ptt(gs.preset)
         log.info(f"TX: released {lock.callsign} on {gs.preset} (guild disconnect)")
+    # Drop any tracked voice-channel listeners for this guild. They're normally
+    # popped when they leave the bot's channel (see _log_listener_change), but
+    # that path only fires while the bot is still there — when the BOT leaves,
+    # the "joined at" entries would otherwise linger forever. Not logged as a
+    # "left" event: they didn't leave, the bot did.
+    stale = [k for k in _voice_listeners if k[0] == guild_id]
+    for k in stale:
+        _voice_listeners.pop(k, None)
+    if stale:
+        log.debug(f"Cleared {len(stale)} tracked listener(s) for guild {guild_id} on disconnect")
     # NOTE: the repeater's SIP monitor deliberately keeps running — leaving
     # the voice channel stops playback, not monitoring/recording.
 
