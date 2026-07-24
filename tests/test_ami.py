@@ -11,7 +11,7 @@ import asyncio
 
 import pytest
 
-from ami import AMIClient, AMICommandError
+from ami import AMIClient, AMICommandError, _parse_nodes
 
 
 def _read(data: bytes) -> str:
@@ -49,3 +49,18 @@ def test_follows_no_output_is_empty_not_error():
     # Must return "" and must NOT raise (this is what the live VHF command did).
     out = _read(b"Response: Follows\r\nPrivilege: Command\r\n--END COMMAND--\r\n")
     assert out == ""
+
+
+# Includes a 7-digit private node and a named peer, which must NOT be dropped.
+_NODES = "********* CONNECTED NODES *********\nT1999, T50719, TDISCORD, R53209, T2000123, TPHONE"
+
+
+def test_parse_nodes_keeps_all_but_own_discord_and_hidden():
+    # Only own node and the bot's own DISCORD entry are excluded by default;
+    # everything else is kept regardless of format (7-digit private, named peer).
+    assert _parse_nodes(_NODES, own_node="50420") == {"1999", "50719", "53209", "2000123", "PHONE"}
+    # hidden nodes (e.g. internal EchoLink 1999) additionally excluded.
+    assert _parse_nodes(_NODES, own_node="50420", hidden=frozenset({"1999"})) == {
+        "50719", "53209", "2000123", "PHONE"}
+    # own node is dropped even when present in the list.
+    assert _parse_nodes("T50420, T50719", own_node="50420") == {"50719"}

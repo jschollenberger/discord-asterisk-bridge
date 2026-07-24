@@ -27,7 +27,7 @@ other clubs can run it against their own AllStar nodes.
   SIP connection from startup, independent of Discord voice. Transmissions
   are detected, recorded, and logged on *all* repeaters full time, not just
   whichever one is currently audible.
-- **Live connection health** — the control panel, `/status`, and the
+- **Live connection health** — the control panel, `/repeater-status`, and the
   terminal dashboard show real SIP connection state per repeater
   (connected/reconnecting/etc), not just "is Discord playing something."
 - **Node activity feed** — polls AllStar link state and posts link/unlink
@@ -86,7 +86,7 @@ If you don't already have a bot application, create one at
    |---|---|
    | View Channels | See the voice and text channels it operates in |
    | Send Messages | Post status, activity-feed, and command replies |
-   | Embed Links | `/status`, `/info`, and the control panel are embeds |
+   | Embed Links | `/repeater-status`, `/repeater-info`, and the control panel are embeds |
    | Attach Files | Upload transmission recordings (when recording is enabled) |
    | Connect | Join the voice channel |
    | Speak | Stream repeater audio into the voice channel |
@@ -207,10 +207,10 @@ infers the target from the channel you ran it in (see
 | `/join`, `/leave` | Join your voice channel and start/stop streaming |
 | `/vhf`, `/uhf`, `/stream <name>` | Switch the active repeater |
 | `/panel` | Post the interactive control panel (buttons, no typing needed) |
-| `/status`, `/info` | Live status / static repeater info card |
+| `/repeater-status` | Live stream/SIP status per repeater, plus each one's linked AllStar nodes |
+| `/repeater-info` | Static repeater info card (frequencies, PL tones, location) |
 | `/link <node>`, `/unlink <node>`, `/unlink-all` | AllStar link control (operator role) |
 | `/link-repeaters`, `/unlink-repeaters` | Bridge/unbridge two of your repeaters |
-| `/node-status` | Live AMI query of connected nodes |
 | `/repeater-cmd <name>` | Run a named HamVOIP action (autocomplete) |
 | `/tx-status`, `/tx-kill` | TX lock status / emergency force-release (operator role) |
 | `/qrz <callsign>` | QRZ.com lookup |
@@ -281,7 +281,7 @@ from the moment the bot starts, independent of Discord voice: transmissions
 on every repeater are VAD-detected, recorded (if enabled), and posted to
 that repeater's activity channel full time. A Discord voice connection is
 just a playback view onto one of these monitors — joining, leaving, or
-switching presets never interrupts monitoring, and `/status` (and the
+switching presets never interrupts monitoring, and `/repeater-status` (and the
 control panel) shows each repeater as either 🔊 live in a voice channel or
 👂 monitoring only. The one thing a single bot application can't do is be
 *audible* in two voice channels at once — that's what satellite tokens are
@@ -309,7 +309,7 @@ per repeater in `config.yaml` (see `config.example.yaml` for full comments):
   process. Satellites join their channel at startup and stream
   simultaneously with the primary — VHF and UHF live in two channels at
   once. All commands, the control panel, and TX remain on the primary bot;
-  `/status` shows satellite SIP state, and the SIP health watch covers
+  `/repeater-status` shows satellite SIP state, and the SIP health watch covers
   them.
 
 To add a satellite: create a second application + bot in the Discord
