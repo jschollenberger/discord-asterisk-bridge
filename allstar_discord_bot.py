@@ -2337,6 +2337,7 @@ async def _ami_check(ctx: commands.Context) -> bool:
 
 
 @bot.hybrid_command(name="link-repeaters", description="Link the VHF and UHF repeaters together.")
+@app_commands.default_permissions()
 @commands.guild_only()
 async def link_repeaters_cmd(ctx: commands.Context):
     """Links VHF node 50420 ↔ UHF node 53209 via the VHF AMI."""
@@ -2369,6 +2370,7 @@ async def link_repeaters_cmd(ctx: commands.Context):
 
 
 @bot.hybrid_command(name="unlink-repeaters", description="Unlink the VHF and UHF repeaters.")
+@app_commands.default_permissions()
 @commands.guild_only()
 async def unlink_repeaters_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
@@ -2398,6 +2400,7 @@ async def unlink_repeaters_cmd(ctx: commands.Context):
 
 
 @bot.hybrid_command(name="link", description="Link a repeater to an AllStar node.")
+@app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
     node="Remote AllStar node number to link to",
@@ -2430,6 +2433,7 @@ async def link_cmd(ctx: commands.Context, node: str, repeater: Optional[str] = N
 
 
 @bot.hybrid_command(name="unlink", description="Unlink a repeater from a specific node.")
+@app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
     node="AllStar node number to disconnect",
@@ -2459,6 +2463,7 @@ async def unlink_cmd(ctx: commands.Context, node: str, repeater: Optional[str] =
 
 
 @bot.hybrid_command(name="unlink-all", description="Disconnect ALL links on a repeater.")
+@app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(repeater="Which repeater (default: this channel's repeater, else the active preset)")
 async def unlink_all_cmd(ctx: commands.Context, repeater: Optional[str] = None):
@@ -2483,6 +2488,7 @@ async def unlink_all_cmd(ctx: commands.Context, repeater: Optional[str] = None):
 
 
 @bot.hybrid_command(name="monitor-node", description="Connect to a node in listen-only (monitor) mode.")
+@app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
     node="AllStar node number to monitor",
@@ -2530,6 +2536,7 @@ async def tx_status_cmd(ctx: commands.Context):
 
 
 @bot.hybrid_command(name="tx-kill", description="Immediately force-release the TX lock on a repeater.")
+@app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(repeater="Which repeater (default: this channel's repeater, else the active preset)")
 async def tx_kill_cmd(ctx: commands.Context, repeater: Optional[str] = None):
@@ -2562,6 +2569,7 @@ async def tx_kill_cmd(ctx: commands.Context, repeater: Optional[str] = None):
     name="repeater-cmd",
     description="Run a named HamVOIP action (e.g. time announcement) on a repeater.",
 )
+@app_commands.default_permissions()
 @commands.guild_only()
 @app_commands.describe(
     command="Which action to run — type to see options",
