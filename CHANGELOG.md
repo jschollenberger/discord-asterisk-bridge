@@ -14,6 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] — 2026-07-23
+
+Bug-fix and small-feature release.
+
+### Fixed
+- **`/solar` returned N/A for every field.** The parser looked for an RSS-style
+  `<item>` element, but hamqsl.com nests everything under `<solar><solardata>…`;
+  it now locates `<solardata>` (with `<item>` and the root as fallbacks). (#23)
+
+### Added
+- **Ctrl-C prints "Shutting down…" immediately** instead of leaving the console
+  silent for ~10–15 s while discord.py's voice-disconnect handshake completes. (#23)
+- **Voice-channel listener logging** — joins and leaves of the channel the bot is
+  streaming into are logged to the console and log file (with time spent on
+  leave); no Discord posting. (#24)
+- **Bot presence shows the active repeater** — "Broadcasting `<repeater> <freq>`",
+  updated on startup and every preset switch. (#24)
+
 ## [1.0.3] — 2026-07-22
 
 Bug-fix release.
@@ -124,7 +142,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.0...v1.0.1
