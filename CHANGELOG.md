@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Voice-channel listener tracking leaked entries when the bot left a
+  channel.** A listener's join is recorded in `_voice_listeners` and popped
+  when they leave — but that pop only fires while the bot is still in the
+  channel. When the bot itself disconnected (`/leave`, panel stop, a true voice
+  drop), those entries lingered for the process lifetime. `_clear_audio_client()`
+  — which every disconnect path already routes through — now drops the departing
+  guild's tracked listeners. (#32)
 - **A SIP monitor could wedge itself after a failed registration or unanswered
   call.** `_connect_and_stream()` wrapped only the RX loop in `try/finally`, so
   two early exits after a successful `phone.start()` — a failed/timed-out
