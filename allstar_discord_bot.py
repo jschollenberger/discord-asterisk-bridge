@@ -26,7 +26,7 @@ Configuration:  edit config.yaml
 Run:            python allstar_discord_bot.py
 
 Commands (slash  /cmd  or prefix  !cmd):
-    /join  /leave  /status  /panel  /stream  /reconnect  /presets  /info
+    /join  /leave  /repeater-status  /panel  /stream  /reconnect  /presets  /repeater-info
 """
 from __future__ import annotations
 
@@ -1333,6 +1333,7 @@ def _status_embed(guild_id: int) -> discord.Embed:
     # preset or satellite), or 👂 monitor-only (still detecting, recording,
     # and posting activity full time; just not audible in Discord, which
     # for non-satellite repeaters needs a dedicated app token to change).
+    node_links = node_monitor.snapshot()
     rpt_lines = []
     for r in cfg.repeaters:
         client = _monitor_clients.get(r.id)
@@ -1351,10 +1352,22 @@ def _status_embed(guild_id: int) -> discord.Embed:
             role = "👂 Monitoring (activity only)"
         sat_tag = " · 🛰 satellite" if r.discord.is_dedicated(cfg.bot.token) else ""
         mark = "▶" if r.id == gs.preset else "·"
-        rpt_lines.append(
+        line = (
             f"{mark} `{r.id}` — {r.display_name} ({r.frequency_mhz:.3f} MHz)\n"
             f"    {sip} · {role}{sat_tag}"
         )
+        # Linked AllStar nodes, from the always-on activity monitor's cached
+        # snapshot (own node, DISCORD, and hidden_nodes already excluded).
+        if r.allstar_node and r.ami:
+            linked = node_links.get(r.id)
+            if linked:
+                links = ", ".join(f"`{n}`" for n in sorted(linked, key=int))
+            elif r.id in node_links:
+                links = "none"
+            else:
+                links = "…"   # monitor hasn't polled this repeater yet
+            line += f"\n    🔗 Linked: {links}"
+        rpt_lines.append(line)
     e.add_field(name="Repeaters", value="\n".join(rpt_lines) or "—", inline=False)
 
     e.set_footer(text=f"{cfg.club.name} · {cfg.club.callsign} · {BOT_NAME}")
@@ -2045,9 +2058,9 @@ async def leave_cmd(ctx: commands.Context):
     await ctx.send(f"📴 Left **{name}**.")
 
 
-@bot.hybrid_command(name="status", description="Show current stream status.")
+@bot.hybrid_command(name="repeater-status", description="Live repeater/stream status and linked nodes.")
 @commands.guild_only()
-async def status_cmd(ctx: commands.Context):
+async def repeater_status_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     await ctx.send(embed=_status_embed(ctx.guild.id), ephemeral=True)
 
@@ -2059,8 +2072,8 @@ async def panel_cmd(ctx: commands.Context):
     await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
 
 
-@bot.hybrid_command(name="info", description="Show K2BR repeater information.")
-async def info_cmd(ctx: commands.Context):
+@bot.hybrid_command(name="repeater-info", description="Show repeater information (frequencies, PL tones, location).")
+async def repeater_info_cmd(ctx: commands.Context):
     """Repeater info card: both machines, frequencies, PL tones, location."""
     # Works in DMs too — _info_embed already supports guild_id=None, falling
     # back to config.yaml's static streaming_now flag instead of live guild
@@ -2488,61 +2501,6 @@ async def monitor_node_cmd(ctx: commands.Context, node: str, repeater: Optional[
         await ctx.send(f"❌ AMI error: `{exc}`")
 
 
-@bot.hybrid_command(name="node-status", description="Show nodes currently linked to the repeaters.")
-async def node_status_cmd(ctx: commands.Context):
-    if not cfg.asterisk.enabled:
-        return await ctx.send("❌ Asterisk control is not enabled.", ephemeral=True)
-    if not await _has_ami_access(ctx):
-        return await ctx.send("❌ You need the operator role to view node status.", ephemeral=True)
-    await ctx.defer()
-    e = discord.Embed(title="📡 Node Status", color=discord.Color.blurple())
-
-    for rpt in cfg.repeaters:
-        if not rpt.allstar_node or not rpt.ami:
-            e.add_field(
-                name=f"{rpt.display_name} ({rpt.frequency_mhz:.3f} MHz)",
-                value="⚙️ No AMI configured",
-                inline=False,
-            )
-            continue
-        try:
-            client   = AMIClient(rpt.ami.host, rpt.ami.port, rpt.ami.username, rpt.ami.password)
-            # rpt nodes: clean comma-separated list with T/R prefix
-            raw_list = await client.get_node_list_raw(rpt.allstar_node)
-            # rpt stats: extract uptime and autopatch state
-            stats    = await client.get_status_text(rpt.allstar_node)
-            age      = node_monitor.poll_age(rpt.id)
-            age_str  = f"  ·  activity feed polled {int(age)}s ago" if age is not None else ""
-
-            # Pull key lines from rpt stats
-            uptime_line   = ""
-            autopatch_line= ""
-            for line in stats.splitlines():
-                if "Uptime" in line and ":" in line:
-                    uptime_line = line.split(":", 1)[1].strip()
-                if "Autopatch state" in line and ":" in line:
-                    autopatch_line = line.split(":", 1)[1].strip()
-
-            value_parts = [f"🔗 **Linked:** `{raw_list}`"]
-            if uptime_line:
-                value_parts.append(f"⏱ **Uptime:** {uptime_line}")
-            if autopatch_line:
-                value_parts.append(f"📞 **Autopatch:** {autopatch_line}")
-            value_parts.append(f"[T=transceive · R=receive-only]{age_str}")
-
-        except Exception as exc:
-            value_parts = [f"❌ AMI unreachable: `{exc}`"]
-
-        e.add_field(
-            name=f"{rpt.display_name} — Node `{rpt.allstar_node}` ({rpt.frequency_mhz:.3f} MHz)",
-            value="\n".join(value_parts),
-            inline=False,
-        )
-
-    e.set_footer(text=f"{cfg.club.callsign} · {BOT_NAME}")
-    await ctx.send(embed=e)
-
-
 @bot.hybrid_command(name="tx-status", description="Show who (if anyone) currently holds TX on each repeater.")
 async def tx_status_cmd(ctx: commands.Context):
     if not cfg.tx.enabled:
@@ -2801,7 +2759,7 @@ async def help_cmd(ctx: commands.Context):
         name="🎛️ Control Panel",
         value=(
             "`/panel` — Post the button panel (▶ Start · ⏹ Stop · 🔄 · 📻 VHF · 📡 UHF)\n"
-            "`/status` — Show stream status (ephemeral)"
+            "`/repeater-status` — Live repeater/stream status + linked nodes (ephemeral)"
         ),
         inline=False,
     )
@@ -2815,7 +2773,6 @@ async def help_cmd(ctx: commands.Context):
             "`/unlink <node>` — Unlink from a specific node\n"
             "`/unlink-all` — Disconnect all links on active repeater\n"
             "`/monitor-node <node>` — Listen-only connection to a node\n"
-            "`/node-status` — Live AMI query of connected nodes\n"
             "`/repeater-cmd <name>` — Run a named HamVOIP action (autocomplete)"
         ),
         inline=False,
@@ -2836,7 +2793,7 @@ async def help_cmd(ctx: commands.Context):
     e.add_field(
         name="🔭 Ham Radio Utilities",
         value=(
-            f"`/info` — {callsign} repeater info: frequencies, PL tones, location\n"
+            f"`/repeater-info` — {callsign} repeater info: frequencies, PL tones, location\n"
             "`/qrz <callsign>` — QRZ.com lookup: name, grid, license class\n"
             "`/solar` — Solar flux, K/A index, HF band conditions\n"
             "`/help` — Show this message"
@@ -2934,7 +2891,8 @@ async def activity_feed():
     """
     # Disabled repeaters are off entirely — no AMI polling either, so a
     # node that's down for maintenance doesn't generate link/unlink noise.
-    await node_monitor.poll(cfg.enabled_repeaters(), bot, cfg.activity_channel_id_for)
+    await node_monitor.poll(cfg.enabled_repeaters(), bot, cfg.activity_channel_id_for,
+                            hidden=cfg.activity.hidden_nodes)
 
 
 @tasks.loop(seconds=20)

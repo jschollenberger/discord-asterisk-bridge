@@ -180,6 +180,12 @@ class ActivityConfig:
                                     # reported duration in the activity
                                     # message is never affected by this cap,
                                     # only the attached recording is.
+    hidden_nodes: frozenset[str]  # node IDs to hide from the linked-node display
+                                    # (/repeater-status) AND the link/unlink
+                                    # activity feed — e.g. an internal EchoLink
+                                    # gateway node that's always connected. The
+                                    # repeater's own node and the bot's DISCORD
+                                    # entry are already excluded regardless.
 
 
 @dataclass
@@ -415,6 +421,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         vad_hangover_seconds  = float(act.get("vad_hangover_seconds", 1.5)),
         record_transmissions  = bool(act.get("record_transmissions", False)),
         max_recording_seconds = float(act.get("max_recording_seconds", 300.0)),
+        hidden_nodes          = frozenset(str(n) for n in (act.get("hidden_nodes", []) or [])),
     )
 
     sh = raw.get("sip_health", {})

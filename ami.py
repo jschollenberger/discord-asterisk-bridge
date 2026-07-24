@@ -300,33 +300,12 @@ class AMIClient:
         log.debug(f"rpt nodes {node} → {output!r}")
         return _parse_nodes(output, own_node=node)
 
-    async def get_node_list_raw(self, node: str) -> str:
-        """
-        Return the raw connected-node line from 'rpt nodes' for display.
-        Preserves the T/R mode prefix so callers can show connection type.
-        Returns 'No connections' if the node list is empty.
-        """
-        output = await self.run_command(f"rpt nodes {node}")
-        for line in output.splitlines():
-            line = line.strip()
-            # Skip headers/dividers, find the actual node list line
-            if line and not line.startswith('*') and not line.startswith('-'):
-                return line
-        return "No connections"
-
-    async def get_status_text(self, node: str) -> str:
-        """
-        Return 'rpt stats <node>' output for display in Discord.
-        Provides uptime, scheduler state, connected nodes, autopatch status, etc.
-        """
-        return await self.run_command(f"rpt stats {node}")
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Node list parser
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _parse_nodes(output: str, own_node: str) -> set[str]:
+def _parse_nodes(output: str, own_node: str, hidden: frozenset[str] = frozenset()) -> set[str]:
     """
     Parse 'rpt nodes <node>' output and return a set of connected node IDs.
 
@@ -339,7 +318,7 @@ def _parse_nodes(output: str, own_node: str) -> set[str]:
         R = Receive-only (monitor mode — audio only, no PTT)
         L = Local (on the same Asterisk instance)
 
-    Own node and non-numeric entries are excluded from the result.
+    Own node, non-numeric entries, and any `hidden` node IDs are excluded.
     """
     nodes: set[str] = set()
     for line in output.splitlines():
@@ -357,8 +336,10 @@ def _parse_nodes(output: str, own_node: str) -> set[str]:
                 node_id = part[1:].strip()
             else:
                 node_id = part
-            # Keep only valid 4-6 digit node numbers, excluding own node
-            if node_id.isdigit() and len(node_id) in range(4, 7) and node_id != own_node:
+            # Keep only valid 4-6 digit node numbers, excluding own node and
+            # any explicitly hidden nodes.
+            if (node_id.isdigit() and len(node_id) in range(4, 7)
+                    and node_id != own_node and node_id not in hidden):
                 nodes.add(node_id)
     return nodes
 
@@ -387,6 +368,7 @@ class NodeActivityMonitor:
         repeaters: list[RepeaterConfig],
         bot,
         channel_id_for,
+        hidden: frozenset[str] = frozenset(),
     ) -> None:
         """
         Poll all repeaters and post any node link/unlink events.
@@ -409,7 +391,7 @@ class NodeActivityMonitor:
                 # _run_quiet suppresses per-poll debug noise; use 'rpt nodes'
                 # which is the validated HamVOIP command for listing linked nodes.
                 raw     = await client._run_quiet(f"rpt nodes {rpt.allstar_node}")
-                current = _parse_nodes(raw, own_node=rpt.allstar_node)
+                current = _parse_nodes(raw, own_node=rpt.allstar_node, hidden=hidden)
                 self._last_polled[rpt.id] = time.time()
             except Exception as exc:
                 log.debug(f"Activity poll error [{rpt.id}]: {exc}")

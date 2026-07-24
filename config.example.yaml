@@ -192,6 +192,13 @@ activity:
                    # channel → Copy Channel ID (Developer Mode required)
   poll_interval_seconds: 15
 
+  # AllStar node IDs to hide from the /repeater-status linked-node list AND the
+  # node link/unlink activity feed — e.g. an always-connected internal EchoLink
+  # gateway node that would otherwise be noise. The repeater's own node and the
+  # bot's own DISCORD connection are already excluded automatically. Leave empty
+  # to show everything.
+  hidden_nodes: []   # e.g. [1999] to hide EchoLink node 1999
+
   # Energy threshold (audioop.rms() on 16-bit PCM) for detecting local
   # transmissions on the SIP audio feed, so the activity log can show
   # "someone actually keyed up" — not just AllStar node link/unlink, which
