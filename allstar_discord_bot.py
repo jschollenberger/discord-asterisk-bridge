@@ -3113,9 +3113,15 @@ async def _wait_ready():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _dashboard_worker(live: Live, stop: threading.Event) -> None:
-    while not stop.is_set():
-        live.update(build_dashboard())
-        time.sleep(1)
+    # stop.wait() returns the instant shutdown is signalled, so the dashboard
+    # stops redrawing immediately instead of up to a second later — otherwise
+    # its next refresh repaints over the shutdown banner. Guarded so a refresh
+    # racing with live.stop() at shutdown can't raise out of the thread.
+    while not stop.wait(1.0):
+        try:
+            live.update(build_dashboard())
+        except Exception:
+            break
 
 
 def main() -> None:
@@ -3149,44 +3155,59 @@ def main() -> None:
     log.info(f"Club: {cfg.club.name} ({cfg.club.callsign})  ·  Repeaters: {[r.id for r in cfg.repeaters]}")
     log.info(f"{'─' * 60}")
 
-    # Immediate Ctrl-C feedback. discord.py's own graceful shutdown — the voice
-    # disconnect handshake, up to ~15s — runs before main()'s finally below, so
-    # without this the console sits silent after Ctrl-C and you can't tell it
-    # registered. Print once, then re-raise so discord.py still tears down
-    # cleanly (this is Python's default SIGINT behavior, just with a line first).
+    stop = threading.Event()
+    live = Live(build_dashboard(), console=console, refresh_per_second=0.5, screen=False)
+
+    # discord.py's own graceful shutdown — the voice-disconnect handshake, up to
+    # ~15s — runs before main()'s finally below. The Rich Live dashboard pins a
+    # render region to the bottom of the terminal and the worker repaints it
+    # every second, so anything printed while it's up (the Ctrl-C banner, the
+    # SIP-teardown logs) is immediately painted over and scrolled off-screen —
+    # it only reappears if you scroll back. So on shutdown, halt the worker and
+    # tear the Live region down FIRST, then print, so output lands on a normal
+    # console. Runs exactly once (flag), from whichever path gets there first.
     _shutdown_announced = False
-    def _on_sigint(_signum, _frame):
+    def _begin_shutdown() -> None:
         nonlocal _shutdown_announced
-        if not _shutdown_announced:
-            _shutdown_announced = True
-            console.print("\n[yellow]⏻ Shutting down — closing voice and SIP "
-                          "connections (this can take ~10–15s)…[/yellow]")
+        if _shutdown_announced:
+            return
+        _shutdown_announced = True
+        stop.set()                     # halt the refresh worker first…
+        try:
+            live.stop()                # …then remove the pinned dashboard region
+        except Exception:
+            pass
+        console.print("\n[yellow]⏻ Shutting down — closing voice and SIP "
+                      "connections (this can take ~10–15s)…[/yellow]")
+
+    def _on_sigint(_signum, _frame):
+        _begin_shutdown()   # immediate Ctrl-C feedback on a torn-down console
         raise KeyboardInterrupt
     signal.signal(signal.SIGINT, _on_sigint)
 
-    stop = threading.Event()
-    with Live(build_dashboard(), console=console, refresh_per_second=0.5, screen=False) as live:
-        worker = threading.Thread(target=_dashboard_worker, args=(live, stop), daemon=True)
-        worker.start()
-        try:
-            sats = cfg.satellite_repeaters()
-            if not sats:
-                # Single-app path — identical to previous releases.
-                bot.run(cfg.bot.token, log_handler=None)
-            else:
-                # Multi-app path: primary + one headless SatelliteBot per
-                # dedicated-token repeater, all on one asyncio loop in this
-                # process so they share state (TX locks, registries, config).
-                # (bot.run()'s logging setup is skipped on the .start() path,
-                # which matches the log_handler=None we pass above.)
-                try:
-                    asyncio.run(_run_all_bots(sats))
-                except KeyboardInterrupt:
-                    pass
-        finally:
-            log.info("Shutting down — stopping SIP monitors…")
-            stop.set()
-            _stop_monitors()
+    live.start()
+    worker = threading.Thread(target=_dashboard_worker, args=(live, stop), daemon=True)
+    worker.start()
+    try:
+        sats = cfg.satellite_repeaters()
+        if not sats:
+            # Single-app path — identical to previous releases.
+            bot.run(cfg.bot.token, log_handler=None)
+        else:
+            # Multi-app path: primary + one headless SatelliteBot per
+            # dedicated-token repeater, all on one asyncio loop in this
+            # process so they share state (TX locks, registries, config).
+            # (bot.run()'s logging setup is skipped on the .start() path,
+            # which matches the log_handler=None we pass above.)
+            try:
+                asyncio.run(_run_all_bots(sats))
+            except KeyboardInterrupt:
+                pass
+    finally:
+        _begin_shutdown()   # no-op if the SIGINT handler already ran; covers a
+                            # non-Ctrl-C exit (fatal error / bot.run returning)
+        log.info("Shutting down — stopping SIP monitors…")
+        _stop_monitors()
 
 
 async def _run_all_bots(sats) -> None:
