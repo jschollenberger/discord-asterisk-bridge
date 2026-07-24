@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-07-24
+
+Bug-fix release — correctness fixes surfaced by an end-to-end code review,
+plus the completion of the internal mypy type-cleanup.
+
 ### Fixed
 - **Voice-channel listener tracking leaked entries when the bot left a
   channel.** A listener's join is recorded in `_voice_listeners` and popped
@@ -201,7 +206,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.2...v1.0.3
