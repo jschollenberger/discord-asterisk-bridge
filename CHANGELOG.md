@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Control-panel "▶ Start" button could raise `AttributeError`.** It read
+  `ix.member`, which `discord.Interaction` does not expose (there is no such
+  attribute and no `__getattr__` fallback), so detecting the presser's voice
+  channel crashed. It now narrows `ix.user` to a `Member`.
+- **Panel-refresh method name collided with discord.py's internals.** The
+  control panel defined `_refresh()`, shadowing `discord.ui.View._refresh()`
+  (which discord.py calls internally with a different signature). Renamed to
+  `_refresh_panel()`.
+
+### Internal
+- Completed the mypy burn-down of `allstar_discord_bot.py` (124 → 0 errors) and
+  removed its per-module `disable_error_code` override, so the module is now
+  gated on every error code like the rest of the codebase. Remaining
+  framework-typing gaps use narrow inline `# type: ignore[code]` comments.
+
 ## [1.1.0] — 2026-07-24
 
 Feature release — new operator-facing conveniences plus a command
