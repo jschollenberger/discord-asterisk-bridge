@@ -48,22 +48,9 @@ warn_redundant_casts = true
 module = ["discord.ext.voice_recv.*", "yaml"]
 ignore_missing_imports = true
 
-# allstar_discord_bot.py (~3k lines) is being type-cleaned incrementally (the
-# mypy burn-down batches). It IS checked now — only the error codes still
-# present are tolerated below, so any *other* error code gates CI, and each
-# batch that drives a code to zero deletes it from this list until the override
-# can go entirely. Progress: Batch 1 (guild/channel Optional-narrowing) took
-# the module from 124 → 69 errors and union-attr from 57 → 9.
-[[tool.mypy.overrides]]
-module = "allstar_discord_bot"
-disable_error_code = [
-    "attr-defined",   # discord.py union types (VoiceProtocol / Connectable / Member|User)
-    "arg-type",       # passing X | None where X is expected
-    "union-attr",     # remaining Optional-narrowing (voice_client, member.voice, …)
-    "return-value",
-    "call-arg",
-    "var-annotated",
-    "override",
-    "method-assign",
-    "call-overload",
-]
+# allstar_discord_bot.py (~3k lines) was type-cleaned incrementally (the mypy
+# burn-down batches: 124 → 69 → 0 errors) and is now checked with no per-module
+# error-code override — every error code gates CI like the other modules. The
+# handful of genuine framework-typing gaps that remain use narrow inline
+# `# type: ignore[code]` comments at the call site (see the discord.py
+# hybrid_command decorators and the voice_recv client methods).
