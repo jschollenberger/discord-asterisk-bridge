@@ -14,14 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] — 2026-07-24
+
+Bug-fix release.
+
+### Fixed
+- **Terminal dashboard's first live refresh was delayed ~1 s.** A regression
+  from the v1.1.2 shutdown fix left the refresh worker waiting a second before
+  its first repaint (it started with `stop.wait()` rather than painting first).
+  The initial render still appeared at startup, but fresh data was a beat late;
+  the worker now paints immediately again and still stops the instant shutdown
+  is signalled. (#37)
+
 ### Internal
 - Extracted the shutdown sequence into a module-level `_begin_shutdown()` with a
   testable ordering contract — the Live dashboard is torn down before any
   shutdown output — and added regression tests for it, the dashboard worker's
   prompt-stop/no-stray-repaint behavior, and the `_fmt_node_event` Discord
   message-length guard (an over-limit batch would make the whole post fail and
-  silently drop the event). The dashboard also paints immediately again; a 1 s
-  first-paint delay had slipped in with the shutdown fix. (#37)
+  silently drop the event). (#37)
 
 ## [1.1.2] — 2026-07-24
 
@@ -229,7 +240,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.2...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.3...HEAD
+[1.1.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.0.4...v1.1.0
