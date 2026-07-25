@@ -391,15 +391,18 @@ def _setup_logging() -> logging.Logger:
 
         def filter(self, record: logging.LogRecord) -> bool:
             exc = record.exc_info[1] if record.exc_info else None
+            # getattr, not exc.winerror: winerror is Windows-only in typeshed,
+            # so a direct access fails mypy on the Linux CI leg.
+            winerror = getattr(exc, "winerror", None)
             if (isinstance(exc, OSError)
-                    and getattr(exc, "winerror", None) in self._WINERRORS
+                    and winerror in self._WINERRORS
                     and "_call_connection_lost" in record.getMessage()):
                 record.levelno   = logging.DEBUG
                 record.levelname = "DEBUG"
                 record.exc_info  = None
                 record.exc_text  = None
                 record.msg = (f"asyncio proactor connection-lost socket teardown "
-                              f"(WinError {exc.winerror}) — benign, the connection was closing")
+                              f"(WinError {winerror}) — benign, the connection was closing")
                 record.args = ()
             return True
 
