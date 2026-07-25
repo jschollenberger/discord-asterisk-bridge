@@ -827,8 +827,16 @@ class RepeaterAudioClient:
             self._call = None   # stop send_frame() from sending to a dead call
             self._set_state(ConnectionState.IDLE)
             if call is not None:
+                # Only hang up a still-answered call. A remote BYE (Asterisk
+                # restart, dropped call, timeout timer) already moves it to
+                # ENDED before this cleanup runs, and rfcvoip.hangup() raises
+                # InvalidStateError("Call is not answered") on a non-ANSWERED
+                # call. That's the normal drop/reconnect path, not an error —
+                # hanging up again is both pointless and logged a full, alarming
+                # traceback. The try/except stays as a backstop for a state race.
                 try:
-                    call.hangup()
+                    if call.state == CallState.ANSWERED:
+                        call.hangup()
                 except Exception:
                     log.debug(f"SIP [{self.extension}]: call.hangup() during cleanup raised", exc_info=True)
             try:

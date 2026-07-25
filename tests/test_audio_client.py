@@ -262,3 +262,59 @@ def test_connect_stops_phone_when_call_setup_raises(monkeypatch):
     with pytest.raises(RuntimeError):
         c._connect_and_stream()
     assert created and created[0].stopped == 1
+
+
+def test_connect_skips_hangup_when_call_already_ended(monkeypatch):
+    """A remote BYE (e.g. the far-end Asterisk restarting) moves the call to
+    ENDED before cleanup. rfcvoip.hangup() raises InvalidStateError on a
+    non-ANSWERED call, so we must not call it — that path logged a full,
+    alarming traceback for what is a normal drop/reconnect."""
+    from rfcvoip.VoIP import CallState
+    c = _session_client(monkeypatch)
+
+    class FakeCall:
+        def __init__(self): self.state = CallState.ANSWERED; self.hangups = 0
+        def read_audio(self, n, blocking=True):
+            self.state = CallState.ENDED   # far end ended the call mid-stream
+            return b""
+        def hangup(self):
+            self.hangups += 1
+            raise AssertionError("hangup() must not run on an already-ended call")
+
+    fake = FakeCall()
+
+    class FakePhone:
+        def start(self): pass
+        def stop(self, *a, **k): pass
+        def get_status(self): return _Status("REGISTERED")
+        def call(self, ext): return fake
+
+    monkeypatch.setattr("rfcvoip.VoIP.VoIPPhone", lambda *a, **k: FakePhone())
+    c._connect_and_stream()
+    assert fake.hangups == 0
+
+
+def test_connect_hangs_up_a_still_answered_call(monkeypatch):
+    """The counterpart: a call that's still ANSWERED at cleanup (e.g. a local
+    stop() mid-stream) IS hung up, so we don't leave a live call dangling."""
+    from rfcvoip.VoIP import CallState
+    c = _session_client(monkeypatch)
+
+    class FakeCall:
+        def __init__(self): self.state = CallState.ANSWERED; self.hangups = 0
+        def read_audio(self, n, blocking=True):
+            c._running = False             # local stop; call stays ANSWERED
+            return b""
+        def hangup(self): self.hangups += 1
+
+    fake = FakeCall()
+
+    class FakePhone:
+        def start(self): pass
+        def stop(self, *a, **k): pass
+        def get_status(self): return _Status("REGISTERED")
+        def call(self, ext): return fake
+
+    monkeypatch.setattr("rfcvoip.VoIP.VoIPPhone", lambda *a, **k: FakePhone())
+    c._connect_and_stream()
+    assert fake.hangups == 1

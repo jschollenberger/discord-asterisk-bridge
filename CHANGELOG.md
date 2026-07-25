@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The benign Windows/asyncio "connection lost" error is no longer logged as a
+  scary `ERROR` + traceback.** When a proactor socket drops, asyncio calls
+  `sock.shutdown()` on a socket Windows already considers invalid, raising
+  `OSError` WinError 10022/10038 — harmless, since the connection is closing
+  anyway. It's now demoted to a one-line DEBUG; every other asyncio error still
+  surfaces normally. (#39)
+- **A benign traceback was logged when a SIP call dropped via a remote BYE**
+  (e.g. the far-end Asterisk restarting). The call moves to `ENDED` before the
+  reconnect cleanup runs `call.hangup()`, and rfcvoip raises
+  `InvalidStateError("Call is not answered")` on a non-answered call — which was
+  caught but logged with a full traceback, making a normal, self-healing
+  reconnect look like a crash. Cleanup now only hangs up a still-`ANSWERED`
+  call. The reconnect itself was already working correctly. (#39)
+
 ## [1.1.3] — 2026-07-24
 
 Bug-fix release.
