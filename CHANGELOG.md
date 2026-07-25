@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Autocomplete could silently break with many configured commands.** Discord
+  rejects an autocomplete response with more than 25 choices (the picker then
+  shows nothing), and `/repeater-cmd`'s command list is bounded only by
+  `repeater_commands` — which a club can easily configure past 25. All
+  autocompletes now cap at 25 choices and clamp each choice's display name to
+  Discord's 100-char limit. (#40)
 - **`/repeater-status` could fail to render when a repeater was linked to a
   large number of nodes.** The "Repeaters" embed field listed every linked node
   with no length cap, and a single busy net could push it past Discord's

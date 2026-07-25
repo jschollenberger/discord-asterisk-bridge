@@ -2284,12 +2284,27 @@ async def uhf_cmd(ctx: commands.Context):
 async def stream_cmd(ctx: commands.Context, preset: str):
     await _switch_to_preset(ctx, preset)
 
+# Discord rejects an autocomplete response with more than 25 choices (the whole
+# response fails, so the user sees no suggestions), and clamps a choice's
+# display name to 100 chars. cfg.repeater_commands in particular can exceed 25
+# (HamVOIP exposes 65+ function codes), so every autocomplete must cap.
+AUTOCOMPLETE_MAX_CHOICES     = 25
+AUTOCOMPLETE_CHOICE_NAME_MAX = 100
+
+
+def _choice(name: str, value: str) -> app_commands.Choice[str]:
+    """Build an app_commands.Choice, clamping the display name to Discord's limit."""
+    if len(name) > AUTOCOMPLETE_CHOICE_NAME_MAX:
+        name = name[:AUTOCOMPLETE_CHOICE_NAME_MAX - 1] + "…"
+    return app_commands.Choice(name=name, value=value)
+
+
 @stream_cmd.autocomplete("preset")
 async def _preset_autocomplete(interaction: discord.Interaction, current: str):
     return [
-        app_commands.Choice(name=f"{r.display_name} ({r.id})", value=r.id)
+        _choice(f"{r.display_name} ({r.id})", r.id)
         for r in cfg.repeaters if current.lower() in r.id.lower()
-    ]
+    ][:AUTOCOMPLETE_MAX_CHOICES]
 
 
 @bot.hybrid_command(name="reconnect", description="Force-reconnect the audio stream.")
@@ -2744,9 +2759,9 @@ async def repeater_cmd_cmd(ctx: commands.Context, command: str, repeater: Option
 
 async def _repeater_target_autocomplete(interaction: discord.Interaction, current: str):
     return [
-        app_commands.Choice(name=f"{r.display_name} ({r.id})", value=r.id)
+        _choice(f"{r.display_name} ({r.id})", r.id)
         for r in cfg.repeaters if current.lower() in r.id.lower()
-    ]
+    ][:AUTOCOMPLETE_MAX_CHOICES]
 
 _repeater_arg_cmds: tuple[Any, ...] = (
     link_cmd, unlink_cmd, unlink_all_cmd, monitor_node_cmd, repeater_cmd_cmd, tx_kill_cmd,
@@ -2763,11 +2778,11 @@ async def _repeater_cmd_autocomplete(interaction: discord.Interaction, current: 
     # (autocomplete choices aren't a hard guarantee of what gets submitted).
     active_id = get_state(interaction.guild.id).preset if interaction.guild else None
     return [
-        app_commands.Choice(name=f"{c.label} ({c.id})", value=c.id)
+        _choice(f"{c.label} ({c.id})", c.id)
         for c in cfg.repeater_commands
         if (current.lower() in c.id.lower() or current.lower() in c.label.lower())
         and (active_id is None or c.valid_for(active_id))
-    ]
+    ][:AUTOCOMPLETE_MAX_CHOICES]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
