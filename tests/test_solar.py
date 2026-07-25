@@ -49,3 +49,14 @@ def test_parse_missing_solardata_yields_all_na():
     assert d["solar_flux"] == "N/A"
     assert d["k_index"]    == "N/A"
     assert d["bands_day"]  == {}
+
+
+def test_parse_falls_back_to_legacy_item_wrapper():
+    # If a future feed drops <solardata> but keeps an RSS-style <item>, the
+    # parser still finds the fields via that fallback rather than going all-N/A.
+    xml = ("<rss><channel><item>"
+           "<solarflux>99</solarflux><kindex>1</kindex>"
+           "</item></channel></rss>")
+    d = solar._parse_solar_xml(xml)
+    assert d["solar_flux"] == "99"
+    assert d["k_index"]    == "1"
