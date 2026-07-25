@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Internal
+- Extracted the shutdown sequence into a module-level `_begin_shutdown()` with a
+  testable ordering contract — the Live dashboard is torn down before any
+  shutdown output — and added regression tests for it, the dashboard worker's
+  prompt-stop/no-stray-repaint behavior, and the `_fmt_node_event` Discord
+  message-length guard (an over-limit batch would make the whole post fail and
+  silently drop the event). The dashboard also paints immediately again; a 1 s
+  first-paint delay had slipped in with the shutdown fix. (#37)
+
 ## [1.1.2] — 2026-07-24
 
 Bug-fix release.

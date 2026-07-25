@@ -3113,15 +3113,40 @@ async def _wait_ready():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _dashboard_worker(live: Live, stop: threading.Event) -> None:
-    # stop.wait() returns the instant shutdown is signalled, so the dashboard
-    # stops redrawing immediately instead of up to a second later — otherwise
-    # its next refresh repaints over the shutdown banner. Guarded so a refresh
-    # racing with live.stop() at shutdown can't raise out of the thread.
-    while not stop.wait(1.0):
+    # Paint immediately, then wait on the event (not sleep) so the dashboard
+    # both shows fresh data at once AND stops redrawing the instant shutdown is
+    # signalled — otherwise its next refresh repaints over the shutdown banner.
+    # The update() is guarded so a refresh racing with live.stop() at shutdown
+    # can't raise out of the thread.
+    while not stop.is_set():
         try:
             live.update(build_dashboard())
         except Exception:
             break
+        if stop.wait(1.0):
+            break
+
+
+def _begin_shutdown(live: Live, stop: threading.Event, console: Console) -> None:
+    """Halt the dashboard refresh worker and tear the Rich Live region down
+    BEFORE announcing shutdown, so the banner and the SIP-teardown logs land on
+    a normal console instead of being painted over (and scrolled off-screen) by
+    the pinned dashboard during discord.py's ~10–15s voice-disconnect handshake.
+
+    Idempotent: stop.set() both halts the worker and marks shutdown as begun, so
+    a second call — the SIGINT handler and then main()'s finally, in either
+    order — is a no-op. live.stop() is best-effort: a teardown hiccup must never
+    swallow the shutdown banner, so the print happens regardless.
+    """
+    if stop.is_set():
+        return
+    stop.set()                     # halt the refresh worker first…
+    try:
+        live.stop()                # …then remove the pinned dashboard region
+    except Exception:
+        pass
+    console.print("\n[yellow]⏻ Shutting down — closing voice and SIP "
+                  "connections (this can take ~10–15s)…[/yellow]")
 
 
 def main() -> None:
@@ -3159,29 +3184,12 @@ def main() -> None:
     live = Live(build_dashboard(), console=console, refresh_per_second=0.5, screen=False)
 
     # discord.py's own graceful shutdown — the voice-disconnect handshake, up to
-    # ~15s — runs before main()'s finally below. The Rich Live dashboard pins a
-    # render region to the bottom of the terminal and the worker repaints it
-    # every second, so anything printed while it's up (the Ctrl-C banner, the
-    # SIP-teardown logs) is immediately painted over and scrolled off-screen —
-    # it only reappears if you scroll back. So on shutdown, halt the worker and
-    # tear the Live region down FIRST, then print, so output lands on a normal
-    # console. Runs exactly once (flag), from whichever path gets there first.
-    _shutdown_announced = False
-    def _begin_shutdown() -> None:
-        nonlocal _shutdown_announced
-        if _shutdown_announced:
-            return
-        _shutdown_announced = True
-        stop.set()                     # halt the refresh worker first…
-        try:
-            live.stop()                # …then remove the pinned dashboard region
-        except Exception:
-            pass
-        console.print("\n[yellow]⏻ Shutting down — closing voice and SIP "
-                      "connections (this can take ~10–15s)…[/yellow]")
-
+    # ~15s — runs before main()'s finally below, so give immediate Ctrl-C
+    # feedback here in the signal handler. _begin_shutdown() tears the dashboard
+    # down before printing (see its docstring) and is idempotent, so calling it
+    # from both the handler and the finally is safe.
     def _on_sigint(_signum, _frame):
-        _begin_shutdown()   # immediate Ctrl-C feedback on a torn-down console
+        _begin_shutdown(live, stop, console)
         raise KeyboardInterrupt
     signal.signal(signal.SIGINT, _on_sigint)
 
@@ -3204,8 +3212,8 @@ def main() -> None:
             except KeyboardInterrupt:
                 pass
     finally:
-        _begin_shutdown()   # no-op if the SIGINT handler already ran; covers a
-                            # non-Ctrl-C exit (fatal error / bot.run returning)
+        _begin_shutdown(live, stop, console)   # no-op if SIGINT already ran;
+                            # covers a non-Ctrl-C exit (fatal error / return)
         log.info("Shutting down — stopping SIP monitors…")
         _stop_monitors()
 
