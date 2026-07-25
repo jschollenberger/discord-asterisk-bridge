@@ -108,3 +108,29 @@ def test_sip_heartbeat_aggregator(bot_module, caplog):
     assert not any(m == "[rfcvoip] Status: 200 OK" for m in msgs)
     assert any("407" in m for m in msgs)
     assert any("call answered" in m for m in msgs)
+
+
+def test_proactor_connection_lost_filter_demotes_winerror(bot_module, caplog):
+    """The benign Windows asyncio 'connection lost' socket teardown (WinError
+    10022/10038 from sock.shutdown on an already-closing connection) is demoted
+    from a scary ERROR+traceback to a one-line DEBUG; other asyncio errors are
+    left alone."""
+    lg = logging.getLogger("asyncio")
+    flt = [f for f in lg.filters if type(f).__name__ == "_ProactorConnectionLostFilter"]
+    assert flt, "proactor connection-lost filter must be attached to asyncio"
+
+    class _ConnLostError(OSError):
+        winerror = 10022   # set as a class attr so it works off-Windows too
+
+    with caplog.at_level(logging.DEBUG, logger="asyncio"):
+        lg.error("Exception in callback _ProactorBasePipeTransport._call_connection_lost()",
+                 exc_info=(_ConnLostError, _ConnLostError("An invalid argument was supplied"), None))
+        lg.error("some other asyncio failure")   # unrelated → untouched
+
+    demoted = [r for r in caplog.records if "proactor connection-lost" in r.getMessage()]
+    assert len(demoted) == 1
+    assert demoted[0].levelno == logging.DEBUG
+    assert demoted[0].exc_info is None                       # traceback stripped
+
+    passthru = [r for r in caplog.records if "some other asyncio failure" in r.getMessage()]
+    assert len(passthru) == 1 and passthru[0].levelno == logging.ERROR

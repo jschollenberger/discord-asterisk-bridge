@@ -375,6 +375,36 @@ def _setup_logging() -> logging.Logger:
 
     logging.getLogger("discord.voice_state").addFilter(_VoiceReconnectFilter())
 
+    class _ProactorConnectionLostFilter(logging.Filter):
+        """
+        Demote the benign Windows/asyncio 'connection lost' socket teardown
+        error. When a proactor transport's connection drops, asyncio calls
+        sock.shutdown(SHUT_RDWR) on a socket Windows already considers invalid,
+        raising OSError WinError 10022 (WSAEINVAL) or 10038 (WSAENOTSOCK).
+        asyncio logs it at ERROR with a full traceback — but the connection is
+        being torn down anyway and nothing is wrong; it just reads like a crash
+        (seen once on a routine SIP/HTTP socket close). Demote that specific
+        case to a one-line DEBUG with no traceback; every other asyncio error
+        passes through untouched. No-op off Windows (OSError has no winerror).
+        """
+        _WINERRORS = {10022, 10038}
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            exc = record.exc_info[1] if record.exc_info else None
+            if (isinstance(exc, OSError)
+                    and getattr(exc, "winerror", None) in self._WINERRORS
+                    and "_call_connection_lost" in record.getMessage()):
+                record.levelno   = logging.DEBUG
+                record.levelname = "DEBUG"
+                record.exc_info  = None
+                record.exc_text  = None
+                record.msg = (f"asyncio proactor connection-lost socket teardown "
+                              f"(WinError {exc.winerror}) — benign, the connection was closing")
+                record.args = ()
+            return True
+
+    logging.getLogger("asyncio").addFilter(_ProactorConnectionLostFilter())
+
     for noisy in ("discord.gateway", "discord.client", "discord.http", "discord.ext.voice_recv"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
