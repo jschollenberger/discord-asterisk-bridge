@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`/repeater-status` could fail to render when a repeater was linked to a
+  large number of nodes.** The "Repeaters" embed field listed every linked node
+  with no length cap, and a single busy net could push it past Discord's
+  1024-char per-field limit — which rejects the *whole* embed, so the command
+  showed nothing. The linked-node list is now capped per repeater with a
+  `… +N more` notice, plus a hard backstop on the field length. (#40)
 - **The benign Windows/asyncio "connection lost" error is no longer logged as a
   scary `ERROR` + traceback.** When a proactor socket drops, asyncio calls
   `sock.shutdown()` on a socket Windows already considers invalid, raising

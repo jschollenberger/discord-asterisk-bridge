@@ -1356,6 +1356,37 @@ async def _has_access(ctx_or_ix) -> bool:
 # Embeds
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Discord hard limit on an embed field's value. A repeater linked to a busy net
+# can have dozens–hundreds of nodes, and one over-long field rejects the WHOLE
+# embed (the send raises), so /repeater-status would show nothing at all.
+EMBED_FIELD_MAX = 1024
+# Per-repeater budget for the linked-node list within that field, leaving room
+# for the other repeaters' lines and the surrounding text.
+LINKED_NODES_MAX_CHARS = 400
+
+
+def _join_capped(items: list[str], max_chars: int, sep: str = ", ") -> str:
+    """
+    Join `items` with `sep`, stopping before the result would exceed
+    `max_chars` and appending a `… +N more` marker for the remainder — so a
+    long list stays within a Discord length limit while still showing the
+    count. Returns "" for an empty list.
+    """
+    out: list[str] = []
+    used = 0
+    for i, item in enumerate(items):
+        addition = len(item) + (len(sep) if out else 0)
+        remaining = len(items) - i
+        marker = f"… +{remaining} more"
+        # Reserve room for the marker in case this item is where we stop.
+        if used + addition > max_chars - (len(sep) + len(marker)):
+            out.append(marker)
+            break
+        out.append(item)
+        used += addition
+    return sep.join(out)
+
+
 def _status_embed(guild_id: int) -> discord.Embed:
     gs         = get_state(guild_id)
     rpt        = cfg.repeater_by_id(gs.preset)
@@ -1423,14 +1454,20 @@ def _status_embed(guild_id: int) -> discord.Embed:
             if linked:
                 # Numeric nodes first (in numeric order), then any named peers.
                 order = sorted(linked, key=lambda n: (0, int(n)) if n.isdigit() else (1, n))
-                links = ", ".join(f"`{n}`" for n in order)
+                links = _join_capped([f"`{n}`" for n in order], LINKED_NODES_MAX_CHARS)
             elif r.id in node_links:
                 links = "none"
             else:
                 links = "…"   # monitor hasn't polled this repeater yet
             line += f"\n    🔗 Linked: {links}"
         rpt_lines.append(line)
-    e.add_field(name="Repeaters", value="\n".join(rpt_lines) or "—", inline=False)
+    # Hard backstop on Discord's field limit — the per-repeater cap above keeps
+    # the realistic (one busy repeater) case tidy; this guarantees the field is
+    # always valid even with an unusual number of repeaters.
+    field_value = "\n".join(rpt_lines) or "—"
+    if len(field_value) > EMBED_FIELD_MAX:
+        field_value = field_value[:EMBED_FIELD_MAX - 1] + "…"
+    e.add_field(name="Repeaters", value=field_value, inline=False)
 
     e.set_footer(text=f"{cfg.club.name} · {cfg.club.callsign} · {BOT_NAME}")
     return e
