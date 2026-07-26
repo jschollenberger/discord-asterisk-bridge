@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 
 This program is free software: you can redistribute it and/or modify
@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from config import RepeaterConfig
 
-log = logging.getLogger("k2br.ami")
+log = logging.getLogger("bot.ami")
 
 _TIMEOUT = 10.0    # seconds for connect + read operations
 

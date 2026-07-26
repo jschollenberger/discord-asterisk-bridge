@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 
 This program is free software: you can redistribute it and/or modify
@@ -30,7 +30,7 @@ import xml.etree.ElementTree as ET
 
 import aiohttp
 
-log = logging.getLogger("k2br.solar")
+log = logging.getLogger("bot.solar")
 
 SOLAR_URL = "https://www.hamqsl.com/solarxml.php"
 

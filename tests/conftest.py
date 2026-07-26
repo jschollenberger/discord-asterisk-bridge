@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 Licensed under GPLv3 — see LICENSE.
 

@@ -91,19 +91,19 @@ def test_voice_reconnect_filter_demotes_and_escalates(bot_module, caplog):
 
 
 def test_sip_heartbeat_aggregator(bot_module, caplog):
-    lg = logging.getLogger("k2br.sip")
+    lg = logging.getLogger("bot.sip")
     hb = [f for f in lg.filters if type(f).__name__ == "_SipHeartbeatAggregator"]
-    assert hb, "aggregator filter must be attached to k2br.sip"
+    assert hb, "aggregator filter must be attached to bot.sip"
     f = hb[0]
     f._counts.clear()
     f._window_start = 0.0   # force the window to be already-elapsed
-    with caplog.at_level(logging.DEBUG, logger="k2br.sip"):
+    with caplog.at_level(logging.DEBUG, logger="bot.sip"):
         lg.debug("[rfcvoip] Method: OPTIONS")        # counted, elapsed → summary
         lg.debug("[rfcvoip] Status: 200 OK")          # new window → swallowed
         lg.debug("[rfcvoip] New register thread")     # swallowed
         lg.debug("[rfcvoip] Status: 407 Proxy Authentication Required")  # passthrough
         lg.info("SIP call answered — streaming node 50420")              # passthrough
-    msgs = [r.getMessage() for r in caplog.records if r.name == "k2br.sip"]
+    msgs = [r.getMessage() for r in caplog.records if r.name == "bot.sip"]
     assert any("SIP heartbeat OK" in m and "1× OPTIONS" in m for m in msgs)
     assert not any(m == "[rfcvoip] Status: 200 OK" for m in msgs)
     assert any("407" in m for m in msgs)

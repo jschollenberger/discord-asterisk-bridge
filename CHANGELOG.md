@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`/help` now carries project accreditation** — an "About" line (project name,
+  version, author, GPLv3) plus **Source** and **Report an issue** link buttons
+  to the GitHub repository.
+
+### Changed
+- **Generic branding.** The project is now "Discord Repeater Bot" (was named for
+  the K2BR/SCARA deployment it was built for). The per-deployment display name
+  shown in embeds/presence/console now uses the club's `name` from config (e.g.
+  "SCARA Repeater Bot") rather than the callsign, so other clubs get their own.
+  Internal logger names changed from `k2br.*` to `bot.*` and the QRZ user-agent
+  is now generic. No config changes required.
+
 ### Fixed
 - **Autocomplete could silently break with many configured commands.** Discord
   rejects an autocomplete response with more than 25 choices (the picker then
