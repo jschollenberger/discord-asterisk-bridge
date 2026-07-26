@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 
 This program is free software: you can redistribute it and/or modify
@@ -94,7 +94,7 @@ HamVOIP setup required (per repeater machine)
     ; database — a check this bot's SIP client will always fail, since it's
     ; a plain SIP UA (authenticated via sip_custom.conf's secret=, not a
     ; registered AllStar peer node). Without an option, Asterisk answers the
-    ; call and then immediately sends BYE (visible in k2br_bot.log as a call
+    ; call and then immediately sends BYE (visible in the bot log as a call
     ; that connects, receives ~1 audio frame, and ends within ~1 second).
     ;
     ; P = "Phone Control mode" — full audio access for a non-node client,
@@ -130,7 +130,7 @@ from typing import Any, Callable, Optional
 
 import discord
 
-log = logging.getLogger("k2br.sip")
+log = logging.getLogger("bot.sip")
 
 # ── Audio constants ───────────────────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ _sip_debug_verbose     = False   # checked live by _bridged_debug on every call,
 
 def _bridge_rfcvoip_debug(verbose: bool = False) -> None:
     """
-    Redirect rfcvoip's internal debug() calls into our own k2br.sip logger,
+    Redirect rfcvoip's internal debug() calls into our own bot.sip logger,
     instead of the raw print() they use by default.
 
     Why this matters: rfcvoip.DEBUG (a module flag) gates its internal
@@ -273,7 +273,7 @@ def _bridge_rfcvoip_debug(verbose: bool = False) -> None:
         _rfcvoip_rtp.debug     = _bridged_debug
         _rfcvoip_voip.debug    = _bridged_debug
         _rfcvoip_debug_bridged = True
-        log.debug(f"rfcvoip internal debug() bridged into k2br.sip logger (verbose={verbose})")
+        log.debug(f"rfcvoip internal debug() bridged into bot.sip logger (verbose={verbose})")
     except Exception:
         log.debug("Could not bridge rfcvoip debug() — its internals will stay silent", exc_info=True)
 

@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 
 This program is free software: you can redistribute it and/or modify
@@ -31,14 +31,14 @@ import aiohttp
 
 from config import BOT_VERSION
 
-log = logging.getLogger("k2br.qrz")
+log = logging.getLogger("bot.qrz")
 
 QRZ_URL   = "https://xmldata.qrz.com/xml/current/"
 # QRZ XML responses declare:  xmlns="http://xmldata.qrz.com"
 # (NOT /xml/current/ — that suffix only appears in the API path, not the namespace)
 _NS       = "http://xmldata.qrz.com"
 _NS_MAP   = {"q": _NS}
-_AGENT    = f"k2br-repeater-bot/{BOT_VERSION}"
+_AGENT    = f"discord-repeater-bot/{BOT_VERSION}"
 
 
 class QRZError(Exception):

@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 
 This program is free software: you can redistribute it and/or modify
@@ -15,8 +15,8 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-K2BR Repeater Bot  v1.1.3
-Streams the K2BR AllStar repeater network into Discord voice/stage channels
+Discord Repeater Bot  v1.1.3
+Streams an AllStar/HamVOIP repeater network into Discord voice/stage channels
 over direct SIP/RTP audio (see repeater_audio.py) — no FFmpeg or Icecast.
 
 Setup:
@@ -66,7 +66,14 @@ _qrz: Optional[QRZClient] = (
     QRZClient(cfg.qrz.username, cfg.qrz.api_key) if cfg.qrz else None
 )
 
-BOT_NAME = f"{cfg.club.callsign} Repeater Bot"
+# Project identity — fixed, the same for every deployment (not user config).
+PROJECT_NAME = "Discord Repeater Bot"
+SOURCE_URL   = "https://github.com/jschollenberger/discord-asterisk-bridge"
+LICENSE      = "GPLv3"
+AUTHOR       = "Jason Schollenberger (KD2QED)"
+
+# Per-deployment display name, driven by the club's own name in config.yaml.
+BOT_NAME = f"{cfg.club.name} Repeater Bot"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Per-Guild State
@@ -256,7 +263,7 @@ def _setup_logging() -> logging.Logger:
         lines/day of pure "still fine" that drowns the file log at DEBUG.
 
         Policy: swallow exactly those three messages, counting them, and
-        emit ONE summary line per window. Anything else from k2br.sip —
+        emit ONE summary line per window. Anything else from bot.sip —
         non-200 statuses, unexpected methods (MESSAGE bursts around
         activity, BYE, INVITE), state transitions, errors — passes through
         untouched and immediately, because deviation from the heartbeat is
@@ -290,7 +297,7 @@ def _setup_logging() -> logging.Logger:
                 return True
             return False
 
-    logging.getLogger("k2br.sip").addFilter(_SipHeartbeatAggregator())
+    logging.getLogger("bot.sip").addFilter(_SipHeartbeatAggregator())
 
     class _VoiceReconnectFilter(logging.Filter):
         """
@@ -411,7 +418,7 @@ def _setup_logging() -> logging.Logger:
     for noisy in ("discord.gateway", "discord.client", "discord.http", "discord.ext.voice_recv"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    return logging.getLogger("k2br")
+    return logging.getLogger("bot")
 
 log = _setup_logging()
 
@@ -1469,7 +1476,7 @@ def _status_embed(guild_id: int) -> discord.Embed:
         field_value = field_value[:EMBED_FIELD_MAX - 1] + "…"
     e.add_field(name="Repeaters", value=field_value, inline=False)
 
-    e.set_footer(text=f"{cfg.club.name} · {cfg.club.callsign} · {BOT_NAME}")
+    e.set_footer(text=f"{BOT_NAME} · {cfg.club.callsign}")
     return e
 
 
@@ -1536,7 +1543,7 @@ def _info_embed(guild_id: Optional[int] = None) -> discord.Embed:
         indicator = "🟢" if (is_active or vc_r is not None) else "⚫"
         e.add_field(name=f"{indicator} {rpt.display_name} Repeater", value=value, inline=True)
 
-    e.set_footer(text=f"{cfg.club.name} · {cfg.club.callsign} · {BOT_NAME}")
+    e.set_footer(text=f"{BOT_NAME} · {cfg.club.callsign}")
     return e
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2851,9 +2858,25 @@ async def solar_cmd(ctx: commands.Context):
         await ctx.send(f"❌ Could not fetch solar data: `{exc}`")
 
 
+def _about_line() -> str:
+    """One-line project accreditation shown in the /help embed."""
+    return f"{PROJECT_NAME} **v{BOT_VERSION}** · by {AUTHOR} · {LICENSE}"
+
+
+def _help_links_view() -> discord.ui.View:
+    """Link buttons (source / issue tracker) shown under the /help reference."""
+    view = discord.ui.View()
+    view.add_item(discord.ui.Button(
+        label="Source", emoji="🔗", style=discord.ButtonStyle.link, url=SOURCE_URL))
+    view.add_item(discord.ui.Button(
+        label="Report an issue", emoji="🐛", style=discord.ButtonStyle.link,
+        url=f"{SOURCE_URL}/issues"))
+    return view
+
+
 @bot.hybrid_command(name="help", description="List all available bot commands.")
 async def help_cmd(ctx: commands.Context):
-    """Organised command reference for the K2BR Repeater Bot."""
+    """Organised command reference for the Discord Repeater Bot."""
     callsign = cfg.club.callsign
     prefix   = cfg.bot.prefix
     vhf_node = next((r.allstar_node for r in cfg.repeaters if r.id == "vhf"), "?")
@@ -2931,8 +2954,14 @@ async def help_cmd(ctx: commands.Context):
         inline=False,
     )
 
-    e.set_footer(text=f"{cfg.club.name} · {callsign} · {BOT_NAME}")
-    await ctx.send(embed=e, ephemeral=True)
+    e.add_field(
+        name="ℹ️ About",
+        value=_about_line(),
+        inline=False,
+    )
+
+    e.set_footer(text=f"{BOT_NAME} · {callsign}")
+    await ctx.send(embed=e, view=_help_links_view(), ephemeral=True)
 
 
 def _solar_embed(data: dict) -> discord.Embed:

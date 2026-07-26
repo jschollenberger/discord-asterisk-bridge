@@ -1,5 +1,5 @@
 """
-K2BR Repeater Bot
+Discord Repeater Bot
 Copyright (C) 2026 Jason Schollenberger / KD2QED
 
 This program is free software: you can redistribute it and/or modify
@@ -161,7 +161,7 @@ class ActivityConfig:
     vad_rms_threshold:     int    # audioop.rms() energy threshold for local-PTT
                                    # detection on the activity feed. Site-dependent —
                                    # see repeater_audio.py's VAD docs and tune by
-                                   # watching k2br_bot.log while keying up.
+                                   # watching the bot log while keying up.
     vad_hangover_seconds:  float  # how long a pause between words/sentences is
                                    # tolerated before a transmission is considered
                                    # over. Also site/operator-dependent — too short
@@ -342,7 +342,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
     bot_cfg = BotConfig(
         token                = b["token"],
         prefix               = b.get("prefix", "!"),
-        log_file             = b.get("log_file", "k2br_bot.log"),
+        log_file             = b.get("log_file", "bot.log"),
         log_file_level       = str(b.get("log_file_level", "DEBUG")).upper(),
         controller_role      = b.get("controller_role", ""),
         auto_join_channel_id = int(b.get("auto_join_channel_id", 0) or 0),
