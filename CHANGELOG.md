@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.5] — 2026-07-24
+
+Bug-fix release.
+
 ### Fixed
 - **Audio could go silent in Discord until a manual restart after a voice-server
   rotation.** When Discord dropped the voice WebSocket (close code 1006) and
@@ -295,7 +299,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.5...HEAD
+[1.1.5]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.1...v1.1.2

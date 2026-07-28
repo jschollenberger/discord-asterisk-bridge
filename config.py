@@ -31,7 +31,7 @@ import yaml
 
 # Single source of truth for the bot version — used by the startup banner,
 # log lines, and the QRZ API user-agent, so a release bump is one edit.
-BOT_VERSION = "1.1.4"
+BOT_VERSION = "1.1.5"
 
 CONFIG_PATH = Path("config.yaml")
 
