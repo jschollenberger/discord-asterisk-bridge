@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   healthy while producing no Discord audio. The watchdog now tracks the channel
   the bot intends to stream in and forces a full rejoin when the voice link is
   down, while still leaving a deliberate `/leave`, panel-stop, or admin kick
-  alone. (#43)
+  alone. (#44)
 
 ## [1.1.4] — 2026-07-24
 
