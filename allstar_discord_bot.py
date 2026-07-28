@@ -42,7 +42,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, ClassVar, Optional, TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -140,6 +140,19 @@ _satellites: dict[str, "SatelliteBot"] = {}   # rpt_id → bot
 _bot_started: float = datetime.now(timezone.utc).timestamp()
 _global_cmds_purged: bool = False   # see on_ready — one-shot stale-command purge
 _loop: Optional[asyncio.AbstractEventLoop] = None
+
+# Strong references to fire-and-forget background tasks. asyncio only holds a
+# WEAK reference to a bare create_task(), so without this the task can be
+# garbage-collected mid-flight and silently never finish (RUF006).
+_background_tasks: set["asyncio.Task[Any]"] = set()
+
+
+def _spawn_background(coro) -> None:
+    """Schedule a fire-and-forget coroutine, keeping a strong reference until it
+    completes so it can't be GC'd out from under the event loop."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 # Voice-channel listeners: (guild_id, member_id) → unix join time, so a leave
 # can report how long they were tuned in. Logged to console + file only.
@@ -281,7 +294,7 @@ def _setup_logging() -> logging.Logger:
         precisely what's diagnostic.
         """
         WINDOW = 600.0   # one summary line per 10 minutes
-        _HEARTBEATS = {
+        _HEARTBEATS: ClassVar[dict[str, str]] = {
             "[rfcvoip] Method: OPTIONS":    "OPTIONS",
             "[rfcvoip] Status: 200 OK":     "200 OK",
             "[rfcvoip] New register thread": "register",
@@ -405,7 +418,7 @@ def _setup_logging() -> logging.Logger:
         case to a one-line DEBUG with no traceback; every other asyncio error
         passes through untouched. No-op off Windows (OSError has no winerror).
         """
-        _WINERRORS = {10022, 10038}
+        _WINERRORS: ClassVar[set[int]] = {10022, 10038}
 
         def filter(self, record: logging.LogRecord) -> bool:
             exc = record.exc_info[1] if record.exc_info else None
@@ -1973,7 +1986,7 @@ async def on_ready():
         if not tx_lock_watch.is_running():
             tx_lock_watch.start()
             log.info("TX lock watch started.")
-        asyncio.create_task(_verify_tx_operators_via_qrz())
+        _spawn_background(_verify_tx_operators_via_qrz())
 
 
 @bot.event
