@@ -91,6 +91,17 @@ class GuildState:
                                                 # manual /reconnect. A rising count is the
                                                 # at-a-glance signal of real voice instability.
     channel:     str             = "—"
+    desired_channel_id: Optional[int] = None   # channel the bot SHOULD be
+                                                # streaming in (set on join,
+                                                # cleared on a deliberate
+                                                # stop/leave/kick). Lets the
+                                                # watchdog force a full rejoin if
+                                                # the voice link dies without a
+                                                # clean disconnect event — e.g. a
+                                                # 1006 server rotation whose
+                                                # reconnect stalls, which
+                                                # otherwise leaves the bot silent
+                                                # in Discord while SIP keeps going.
 
 
 _guild_states: dict[int, GuildState] = {}
@@ -1671,6 +1682,7 @@ class ControlPanelView(discord.ui.View):
             gs.streaming  = False
             gs.started_at = None
             gs.channel    = "—"
+            gs.desired_channel_id = None   # deliberate stop — don't let the watchdog rejoin
             _clear_audio_client(ix.guild.id)
             log.info(f"Stream stopped via panel [{ix.guild.name}]")
             await self._refresh_panel(ix)
@@ -1733,6 +1745,7 @@ class ControlPanelView(discord.ui.View):
                 if isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
                     await vc.move_to(ch)
                     gs.channel = ch.name
+                    gs.desired_channel_id = ch.id
             _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
             gs.started_at = datetime.now(timezone.utc).timestamp()   # switching preset is a fresh stream — reset "Stream Up"
             log.info(f"Switched to {preset_id} via panel [{ix.guild.name}]")
@@ -2055,6 +2068,7 @@ async def on_voice_state_update(
     gs.streaming  = False
     gs.started_at = None
     gs.channel    = "—"
+    gs.desired_channel_id = None   # Discord confirmed a clean disconnect — don't rejoin
     _clear_audio_client(guild.id)
     log.warning(f"Bot truly disconnected from '{channel_name}' [{guild.name}]")
 
@@ -2122,6 +2136,7 @@ async def _do_join(guild: discord.Guild, channel) -> str:
     gs.streaming  = True
     gs.started_at = datetime.now(timezone.utc).timestamp()
     gs.channel    = channel.name
+    gs.desired_channel_id = channel.id   # watchdog rejoin target
     ts = int(gs.started_at)
 
     rpt   = cfg.repeater_by_id(gs.preset)
@@ -2163,6 +2178,7 @@ async def leave_cmd(ctx: commands.Context):
     gs.streaming  = False
     gs.started_at = None
     gs.channel    = "—"
+    gs.desired_channel_id = None   # user asked to leave — don't let the watchdog rejoin
     _clear_audio_client(ctx.guild.id)
     log.info(f"Left '{name}' [{ctx.guild.name}]")
     await ctx.send(f"📴 Left **{name}**.")
@@ -2254,6 +2270,7 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
         if target_ch is not None:
             await vc.move_to(target_ch)
             gs.channel = target_ch.name
+            gs.desired_channel_id = target_ch.id
         _play_paused(vc, _make_source(gs.preset, ctx.guild.id), after=lambda e: _after_play(e, vc))
         gs.started_at = datetime.now(timezone.utc).timestamp()   # switching preset is a fresh stream — reset "Stream Up"
         moved = f" in **{target_ch.name}**" if target_ch is not None else ""
@@ -2995,13 +3012,28 @@ def _solar_embed(data: dict) -> discord.Embed:
 # Background Tasks
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _should_rejoin(gs: GuildState, connected: bool) -> bool:
+    """The watchdog should force a full rejoin when we still intend to be
+    streaming somewhere (desired_channel_id set) but the voice connection is
+    down. This catches a dead/stuck voice link that never fired a clean
+    disconnect event — e.g. a 1006 server rotation whose reconnect stalled,
+    which otherwise leaves the bot silent in Discord (SIP/recording keep
+    working) until someone restarts it. A deliberate /leave, panel-stop, or
+    admin kick clears desired_channel_id, so those are not rejoined."""
+    return gs.desired_channel_id is not None and not connected
+
+
 @tasks.loop(seconds=30)
 async def watchdog():
-    """Reconnect any guild whose voice client is connected but not playing."""
+    """Keep each guild's stream alive: restart playback if the voice client is
+    connected but idle, and force a full rejoin if the voice link has died while
+    we still intend to be streaming (see _should_rejoin)."""
     for guild in bot.guilds:
+        gs = get_state(guild.id)
         vc = _vc(guild.voice_client)
-        if vc and vc.is_connected() and not vc.is_playing() and not vc.is_paused():
-            gs = get_state(guild.id)
+        connected = bool(vc and vc.is_connected())
+
+        if vc is not None and connected and not vc.is_playing() and not vc.is_paused():
             log.warning(f"Watchdog: not playing in '{guild.name}' — reconnecting…")
             try:
                 _play_paused(vc, _make_source(gs.preset, guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
@@ -3012,6 +3044,25 @@ async def watchdog():
                 log.info(f"Watchdog reconnect OK [{guild.name}] (#{gs.reconnects})")
             except Exception as exc:
                 log.error(f"Watchdog reconnect failed [{guild.name}]: {exc}")
+
+        elif _should_rejoin(gs, connected):
+            ch = bot.get_channel(gs.desired_channel_id) if gs.desired_channel_id else None
+            if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
+                continue
+            log.warning(f"Watchdog: voice link down in '{guild.name}' — rejoining '{ch.name}'…")
+            if vc is not None:
+                # Tear down the stale/stuck client so channel.connect() in
+                # _do_join isn't rejected as "already connected".
+                try:
+                    await vc.disconnect(force=True)
+                except Exception:
+                    log.debug(f"Watchdog: force-disconnect of stale client raised [{guild.name}]", exc_info=True)
+            try:
+                result = await _do_join(guild, ch)
+                gs.reconnects += 1
+                log.info(f"Watchdog rejoin [{guild.name}] (#{gs.reconnects}): {result}")
+            except Exception as exc:
+                log.error(f"Watchdog rejoin failed [{guild.name}]: {exc}")
 
 
 @tasks.loop(seconds=3)

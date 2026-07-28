@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Audio could go silent in Discord until a manual restart after a voice-server
+  rotation.** When Discord dropped the voice WebSocket (close code 1006) and
+  discord.py's reconnect stalled ("Could not connect to voice… Retrying…"), the
+  connection stayed dead — no clean-disconnect event fired, so nothing noticed.
+  The SIP side kept running (recordings/activity intact), so the bot looked
+  healthy while producing no Discord audio. The watchdog now tracks the channel
+  the bot intends to stream in and forces a full rejoin when the voice link is
+  down, while still leaving a deliberate `/leave`, panel-stop, or admin kick
+  alone. (#43)
+
 ## [1.1.4] — 2026-07-24
 
 Accreditation and generic branding, plus bug fixes.
