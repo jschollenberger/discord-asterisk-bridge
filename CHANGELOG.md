@@ -14,7 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.5] — 2026-07-24
+### Fixed
+- **A rejected SIP registration retried every ~3 s with no back-off.** When the
+  far-end Asterisk was up but rejecting (wrong credentials, missing peer), the
+  monitor hammered it with a fresh REGISTER every few seconds — noisy, and
+  aggressive enough to risk tripping the server's fail2ban. Registration/connect
+  failures now use the same exponential back-off (2 s → 60 s cap) as other
+  reconnects and surface as `RECONNECTING` (so the dashboard and SIP-health alert
+  reflect the outage). A real streaming session still resets the back-off. (#47)
 
 Bug-fix release.
 

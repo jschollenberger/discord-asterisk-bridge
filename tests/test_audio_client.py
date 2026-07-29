@@ -223,7 +223,8 @@ def _session_client(monkeypatch) -> ra.RepeaterAudioClient:
 
 
 def test_connect_stops_phone_when_registration_fails(monkeypatch):
-    """Started OK but never registered → must still stop the phone."""
+    """Started OK but never registered → must still stop the phone, and report
+    False so _run() backs off instead of hammering the server."""
     c = _session_client(monkeypatch)
     created = []
 
@@ -237,8 +238,33 @@ def test_connect_stops_phone_when_registration_fails(monkeypatch):
         p = FakePhone(); created.append(p); return p
     monkeypatch.setattr("rfcvoip.VoIP.VoIPPhone", _factory)
 
-    c._connect_and_stream()   # returns normally on a failed registration
+    assert c._connect_and_stream() is False   # did not connect → back off
     assert created and created[0].stopped == 1
+
+
+def test_connect_returns_true_after_a_real_session(monkeypatch):
+    """Reaching the RX loop counts as a real session → returns True so _run()
+    resets its back-off (a dropped call is not a credentials problem)."""
+    from rfcvoip.VoIP import CallState
+    c = _session_client(monkeypatch)
+
+    class FakeCall:
+        def __init__(self): self.state = CallState.ANSWERED
+        def read_audio(self, n, blocking=True):
+            c._running = False          # end the RX loop after one read
+            return b""
+        def hangup(self): pass
+
+    fake = FakeCall()
+
+    class FakePhone:
+        def start(self): pass
+        def stop(self, *a, **k): pass
+        def get_status(self): return _Status("REGISTERED")
+        def call(self, ext): return fake
+
+    monkeypatch.setattr("rfcvoip.VoIP.VoIPPhone", lambda *a, **k: FakePhone())
+    assert c._connect_and_stream() is True
 
 
 def test_connect_stops_phone_when_call_setup_raises(monkeypatch):
