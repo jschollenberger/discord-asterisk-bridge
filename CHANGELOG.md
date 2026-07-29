@@ -25,9 +25,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Reconnect are otherwise unchanged.
 - **Reordered and recolored the panel buttons** to read left-to-right as the
   workflow, now on a single row: **📻 VHF** · **📡 UHF** (green — the start
-  action) · **🔄 Reconnect** (grey — a rare manual escape hatch) · **⏹ Stop**
-  (red). The presets lead and are green because they now drive "start"; Stop
-  keeps its red danger cue at the end.
+  action) · **🔄 Reconnect** (grey) · **⏹ Stop** (red). The presets lead and
+  are green because they now drive "start"; Stop keeps its red danger cue at
+  the end.
+- **The panel's 🔄 Reconnect button now does a full recovery rejoin** instead of
+  just restarting playback. It tears down the (possibly wedged) voice client and
+  rejoins the channel from scratch — the manual counterpart to the watchdog's
+  automatic force-rejoin — so it can recover the failure a user actually
+  notices: silent audio on a voice link that's dead but still looks "connected"
+  (the 1006 / reconnect-stall case), a stuck playback view, or the bot having
+  been dropped from the channel. It intentionally leaves the always-on SIP
+  monitor alone (that self-heals and is shared with recording); the refreshed
+  panel still shows the SIP state so a SIP-side outage stays visible.
 
 ### Fixed
 - **A deliberate Stop was logged as a scary `WARNING`.** Pressing the panel

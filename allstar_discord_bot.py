@@ -1749,24 +1749,63 @@ class ControlPanelView(discord.ui.View):
 
     @discord.ui.button(label="🔄 Reconnect", style=discord.ButtonStyle.secondary, custom_id="cp_reconnect")
     async def btn_reconnect(self, ix: discord.Interaction, _: discord.ui.Button):
+        """
+        Recovery button — the manual counterpart to the watchdog's force-rejoin.
+        When a user notices something wrong (silent audio, stuck/laggy stream),
+        do as much as we safely can to recover: tear down the (possibly wedged)
+        voice client and rejoin the channel we intend to stream in from scratch,
+        which _do_join then re-attaches a fresh playback source to. This recovers
+        the cases a user actually sees — a dead-but-"connected" voice link (the
+        1006/reconnect-stall silent-audio bug), a stuck playback view, or the bot
+        having been dropped from the channel entirely.
+
+        It does not restart the SIP monitor: that client is always-on, shared,
+        and self-heals with back-off, and tearing it down here would interrupt
+        its recording/activity for no gain. The refreshed panel shows the SIP
+        state, so a SIP-side outage stays visible.
+        """
         assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
+        gs = get_state(ix.guild.id)
         vc = _vc(ix.guild.voice_client)
-        if vc is None:
-            await ix.response.send_message("❌ Not connected.", ephemeral=True)
+
+        # Where should we be? The intended channel, else the one we're in, else
+        # the preset's configured channel. Without any of those there's nothing
+        # to rejoin.
+        ch: Any = bot.get_channel(gs.desired_channel_id) if gs.desired_channel_id else None
+        if ch is None and vc is not None:
+            ch = vc.channel
+        if ch is None:
+            rpt   = cfg.repeater_by_id(gs.preset)
+            ch_id = (rpt.discord.channel_id if rpt else 0) or cfg.bot.auto_join_channel_id
+            ch    = bot.get_channel(ch_id) if ch_id else None
+        if not isinstance(ch, (discord.VoiceChannel, discord.StageChannel)):
+            await ix.response.send_message(
+                "❌ Nothing to reconnect — no active stream and no channel configured to rejoin.",
+                ephemeral=True,
+            )
             return
+
         try:
             await ix.response.defer()
         except Exception as exc:
             log.error(f"btn_reconnect: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
             return
         try:
-            gs = get_state(ix.guild.id)
-            vc.stop()
-            await asyncio.sleep(1)
-            _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
-            # User-requested reconnect — deliberately does NOT bump gs.reconnects.
-            log.info(f"Manual reconnect via panel [{ix.guild.name}]")
+            # Force-drop the existing (possibly stuck) client so channel.connect()
+            # inside _do_join isn't rejected as "already connected", then rejoin
+            # from scratch — the same recovery the watchdog performs automatically.
+            if vc is not None:
+                try:
+                    vc.stop()
+                    await vc.disconnect(force=True)
+                except Exception:
+                    log.debug(f"btn_reconnect: force-disconnect of stale client raised [{ix.guild.name}]", exc_info=True)
+                await asyncio.sleep(1)
+            result = await _do_join(ix.guild, ch)
+            # User-initiated recovery — deliberately does NOT bump gs.reconnects,
+            # which tracks automatic, failure-driven reconnects.
+            log.info(f"Manual recovery rejoin via panel → '{ch.name}' [{ix.guild.name}]: {result}")
             await self._refresh_panel(ix)
         except Exception as exc:
             log.error(f"btn_reconnect failed [{ix.guild.name}]: {exc}", exc_info=True)
