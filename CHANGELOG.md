@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Control-panel buttons did nothing ("… didn't respond in time").** Clicks
+  reached the bot but the view callbacks never ran — a panel posted via the
+  slash `/panel` (an interaction response) wasn't dispatching to the persistent
+  view's `custom_id` registration. `/panel` now binds the view to the specific
+  message it posts, so the buttons fire. Added diagnostics (the message id is
+  logged on each button press and view registration is confirmed at startup) to
+  confirm the path end-to-end. (#48)
 - **Startup QRZ operator-verification task could be garbage-collected before it
   ran.** `on_ready` scheduled it with a bare `asyncio.create_task()`, which the
   event loop only weak-references — so it could be GC'd mid-flight and silently
