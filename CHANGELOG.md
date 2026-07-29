@@ -12,7 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > they refer to that pre-release internal numbering, not to any published
 > release.
 
-## [Unreleased]
+## [1.2.0] — 2026-07-29
+
+A control-panel UX overhaul — presets self-start, a one-row layout, and a
+Reconnect button that actually recovers a stuck stream — plus reliability and
+logging fixes.
 
 ### Changed
 - **Control-panel presets now start the stream — the Start button is gone.**
@@ -357,7 +361,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.5...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.5...v1.2.0
 [1.1.5]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.2...v1.1.3

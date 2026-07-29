@@ -15,7 +15,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-Discord Repeater Bot  v1.1.5
+Discord Repeater Bot  v1.2.0
 Streams an AllStar/HamVOIP repeater network into Discord voice/stage channels
 over direct SIP/RTP audio (see repeater_audio.py) — no FFmpeg or Icecast.
 
