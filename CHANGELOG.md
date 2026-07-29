@@ -22,13 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures now use the same exponential back-off (2 s → 60 s cap) as other
   reconnects and surface as `RECONNECTING` (so the dashboard and SIP-health alert
   reflect the outage). A real streaming session still resets the back-off. (#47)
-- **Control-panel buttons did nothing ("… didn't respond in time").** Clicks
-  reached the bot but the view callbacks never ran — a panel posted via the
-  slash `/panel` (an interaction response) wasn't dispatching to the persistent
-  view's `custom_id` registration. `/panel` now binds the view to the specific
-  message it posts, so the buttons fire. Added diagnostics (the message id is
-  logged on each button press and view registration is confirmed at startup) to
-  confirm the path end-to-end. (#48)
+- **Control-panel buttons did nothing ("… didn't respond in time").** The panel
+  view was instantiated at module import — before the event loop existed — and a
+  `discord.ui.View` built with no running loop gets an internal `__stopped`
+  future of `None`, which makes discord.py silently drop every button
+  interaction (the callback never runs and no error is logged). The view is now
+  created inside the loop (in `on_ready`), so its buttons dispatch. (#48, #49)
 - **Startup QRZ operator-verification task could be garbage-collected before it
   ran.** `on_ready` scheduled it with a bare `asyncio.create_task()`, which the
   event loop only weak-references — so it could be GC'd mid-flight and silently

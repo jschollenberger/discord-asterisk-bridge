@@ -1823,7 +1823,11 @@ bot = commands.Bot(
     intents=intents,
     help_command=None,        # disable built-in !help so we can register /help ourselves
 )
-_panel_view = ControlPanelView()
+# Created in on_ready (see there), NOT here: a discord.ui.View instantiated
+# without a running event loop gets __stopped=None, and discord.py then silently
+# drops every button interaction (no callback runs, no error is raised). Building
+# it at import time — before the loop exists — is exactly that trap.
+_panel_view: Optional[ControlPanelView] = None
 
 
 # ── Command invocation logging ────────────────────────────────────────────────
@@ -1903,9 +1907,15 @@ async def _update_presence(rpt) -> None:
 
 @bot.event
 async def on_ready():
-    global _loop
+    global _loop, _panel_view
     _loop = asyncio.get_running_loop()
 
+    # Instantiate the control panel view HERE, inside the running loop, so its
+    # internal __stopped future is created — a View built without a live loop
+    # (e.g. at module import) silently drops every button interaction. Guarded
+    # so re-fires (gateway reconnects) reuse the one instance.
+    if _panel_view is None:
+        _panel_view = ControlPanelView()
     bot.add_view(_panel_view)
     log.debug(f"Control panel view registered (persistent={_panel_view.is_persistent()})")
 
@@ -2209,13 +2219,12 @@ async def repeater_status_cmd(ctx: commands.Context):
 @bot.hybrid_command(name="panel", description="Post the interactive control panel here.")
 @commands.guild_only()
 async def panel_cmd(ctx: commands.Context):
-    assert ctx.guild is not None  # guaranteed by @commands.guild_only()
+    assert ctx.guild is not None    # guaranteed by @commands.guild_only()
+    assert _panel_view is not None  # created in on_ready before any command runs
     msg = await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
-    # Bind the persistent view to THIS specific message. A panel posted via the
-    # slash /panel goes out as an interaction response, and (observed live) the
-    # button clicks reached on_interaction but never the view callback — i.e. the
-    # custom_id-only persistent registration wasn't dispatching. A message-scoped
-    # binding is matched ahead of that fallback and should make the buttons fire.
+    # Also bind the view to THIS specific message id (belt-and-suspenders — the
+    # actual dispatch fix is instantiating the view inside the loop, see
+    # on_ready). Harmless and slightly more robust for reposted panels.
     msg_id = getattr(msg, "id", None)
     if msg_id is not None:
         try:
