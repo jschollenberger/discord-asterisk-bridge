@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Startup QRZ operator-verification task could be garbage-collected before it
+  ran.** `on_ready` scheduled it with a bare `asyncio.create_task()`, which the
+  event loop only weak-references — so it could be GC'd mid-flight and silently
+  skip verifying the `tx_operators` callsigns. It now keeps a strong reference
+  until the task completes. (Surfaced by adopting Ruff's `RUF006` rule.) (#46)
+
+### Internal
+- Adopted Ruff 0.16's bug-catching rule categories — `ASYNC` (async
+  correctness), `LOG` (logging), and `RUF` — while keeping the cosmetic ones
+  (UP/SIM/PERF, the formatter) out of scope per the project's style. Pinned CI's
+  ruff to the 0.16 line so lint is reproducible instead of silently tracking
+  whatever ruff releases next. (#46)
+
 ## [1.1.5] — 2026-07-24
 
 Bug-fix release.
