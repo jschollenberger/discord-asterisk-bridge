@@ -609,8 +609,20 @@ class RepeaterAudioClient:
                 self._voice_active      = False  # ditto — don't carry a stale
                 self._silence_run       = 0       # "in progress" transmission
                 self._activity_start_ts = None    # across a reconnect
-                self._connect_and_stream()
-                backoff = 2.0                        # reset back-off after clean exit
+                streamed = self._connect_and_stream()
+                if streamed:
+                    backoff = 2.0                    # real session — reset back-off
+                elif self._running:
+                    # Exited before ever connecting — a rejected registration
+                    # (bad credentials, missing peer) won't fix itself in a few
+                    # seconds, so back off instead of hammering the SIP server
+                    # every ~3s (which also risks tripping its fail2ban). The
+                    # state shows RECONNECTING so the dashboard and SIP-health
+                    # alert reflect it.
+                    self._set_state(ConnectionState.RECONNECTING)
+                    log.debug(f"SIP [{self.extension}]: connect failed — retrying in {backoff:.0f}s")
+                    time.sleep(backoff)
+                    backoff = min(backoff * 1.5, 60.0)
             except Exception as exc:
                 if not self._running:
                     break
@@ -676,10 +688,14 @@ class RepeaterAudioClient:
             )
         return False
 
-    def _connect_and_stream(self) -> None:
+    def _connect_and_stream(self) -> bool:
         """
         Register, call, and stream audio until the call ends or stop() is called.
-        Raises on any fatal error so _run() can log and retry.
+
+        Returns True if a call was actually established and streamed, False if we
+        exited before ever connecting (e.g. a rejected/timed-out registration),
+        so _run() can back off instead of retrying immediately. Raises on any
+        fatal error (also handled by _run's back-off path).
         """
         log.debug(f"SIP [{self.extension}]: _connect_and_stream() starting")
 
@@ -692,7 +708,7 @@ class RepeaterAudioClient:
                 "Install it with:  pip install rfcvoip"
             )
             time.sleep(60)
-            return
+            return False
         _bridge_rfcvoip_debug(self.sip_debug_verbose)
 
         # Pin the *public* audio format to 16-bit signed PCM @ 8kHz mono.
@@ -769,11 +785,11 @@ class RepeaterAudioClient:
         frames_received = 0
         try:
             if not self._await_registration(phone):
-                return   # outer loop applies its normal reconnect backoff
+                return False   # registration rejected/timed out — _run backs off
 
             if not self._running:
                 log.debug(f"SIP [{self.extension}]: stop() requested during registration wait — aborting")
-                return
+                return False
 
             call = phone.call(self.extension)
             log.info(f"SIP calling extension {self.extension!r}…")
@@ -785,7 +801,7 @@ class RepeaterAudioClient:
             while time.time() < deadline:
                 if not self._running:
                     log.debug(f"SIP [{self.extension}]: stop() requested while waiting for answer — hanging up")
-                    return
+                    return False
                 if call.state != last_logged_state:
                     log.debug(f"SIP [{self.extension}]: call.state {last_logged_state!r} → {call.state!r}")
                     last_logged_state = call.state
@@ -816,6 +832,7 @@ class RepeaterAudioClient:
                         log.debug(f"SIP [{self.extension}]: first RX audio frame received")
                     frames_received += 1
                     self._ingest_rx_frame(pcm_8k_mono)
+            return True   # we connected and streamed — _run resets its back-off
         finally:
             if connected_at is not None:
                 connected_secs = time.time() - connected_at
