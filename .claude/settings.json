@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/Scripts/python.exe -m pytest *)",
+      "Bash(.venv/Scripts/python.exe -m mypy *)",
+      "Bash(.venv/Scripts/python.exe -m ruff *)"
+    ]
+  }
+}

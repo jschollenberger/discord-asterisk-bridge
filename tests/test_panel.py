@@ -27,3 +27,13 @@ def test_every_panel_button_has_a_unique_custom_id(bot_module):
     ids = [getattr(item, "custom_id", None) for item in bot_module.ControlPanelView().children]
     assert ids and all(cid for cid in ids)   # no None / empty custom_ids
     assert len(ids) == len(set(ids))         # and they're unique
+
+
+def test_panel_has_no_standalone_start_button(bot_module):
+    # The VHF/UHF preset buttons ARE the start action (clicking one joins the
+    # repeater's configured channel and streams it), so there is no separate
+    # Start button. If cp_start comes back, the self-start presets probably got
+    # reverted — see _switch_via_panel's idle branch.
+    ids = {getattr(item, "custom_id", None) for item in bot_module.ControlPanelView().children}
+    assert "cp_start" not in ids
+    assert {"cp_vhf", "cp_uhf"} <= ids   # the presets that replaced it
