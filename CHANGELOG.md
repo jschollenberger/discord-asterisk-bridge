@@ -22,6 +22,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures now use the same exponential back-off (2 s → 60 s cap) as other
   reconnects and surface as `RECONNECTING` (so the dashboard and SIP-health alert
   reflect the outage). A real streaming session still resets the back-off. (#47)
+- **Control-panel buttons did nothing ("… didn't respond in time").** Clicks
+  reached the bot but the view callbacks never ran — a panel posted via the
+  slash `/panel` (an interaction response) wasn't dispatching to the persistent
+  view's `custom_id` registration. `/panel` now binds the view to the specific
+  message it posts, so the buttons fire. Added diagnostics (the message id is
+  logged on each button press and view registration is confirmed at startup) to
+  confirm the path end-to-end. (#48)
+- **Startup QRZ operator-verification task could be garbage-collected before it
+  ran.** `on_ready` scheduled it with a bare `asyncio.create_task()`, which the
+  event loop only weak-references — so it could be GC'd mid-flight and silently
+  skip verifying the `tx_operators` callsigns. It now keeps a strong reference
+  until the task completes. (Surfaced by adopting Ruff's `RUF006` rule.) (#46)
+
+### Internal
+- Adopted Ruff 0.16's bug-catching rule categories — `ASYNC` (async
+  correctness), `LOG` (logging), and `RUF` — while keeping the cosmetic ones
+  (UP/SIM/PERF, the formatter) out of scope per the project's style. Pinned CI's
+  ruff to the 0.16 line so lint is reproducible instead of silently tracking
+  whatever ruff releases next. (#46)
+
+## [1.1.5] — 2026-07-24
 
 Bug-fix release.
 

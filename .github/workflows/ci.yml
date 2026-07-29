@@ -32,7 +32,11 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install ruff
-        run: pip install ruff
+        # Pin to the 0.16 line so lint is reproducible — an unpinned install
+        # silently adopts whatever ruff releases next (0.16 expanded the default
+        # rule set enormously), which could break CI with no warning. Bumps come
+        # via the requirements-dev.txt floor + Dependabot instead.
+        run: pip install "ruff>=0.16,<0.17"
       - name: Ruff (lint)
         run: ruff check .
 
