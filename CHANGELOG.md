@@ -22,7 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   This removes the old **▶ Start** button, which only worked if *you* were
   already sitting in a voice channel — confusing, since the bot streams to its
   own configured channel, not wherever the clicker happens to be. Stop and
-  Reconnect are unchanged.
+  Reconnect are otherwise unchanged.
+- **Reordered and recolored the panel buttons** to read left-to-right as the
+  workflow, now on a single row: **📻 VHF** · **📡 UHF** (green — the start
+  action) · **🔄 Reconnect** (grey — a rare manual escape hatch) · **⏹ Stop**
+  (red). The presets lead and are green because they now drive "start"; Stop
+  keeps its red danger cue at the end.
 
 ### Fixed
 - **A rejected SIP registration retried every ~3 s with no back-off.** When the

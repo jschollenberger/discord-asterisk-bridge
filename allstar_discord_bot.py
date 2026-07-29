@@ -1647,61 +1647,11 @@ class ControlPanelView(discord.ui.View):
         except Exception as exc:
             log.warning(f"Could not send panel error message: {exc}")
 
-    # ── Row 1 ─────────────────────────────────────────────────────────────────
-    # No Start button: the VHF/UHF preset buttons (Row 2) are the start action —
-    # clicking one joins that repeater's configured channel and streams it.
-
-    @discord.ui.button(label="⏹ Stop",      style=discord.ButtonStyle.red,     custom_id="cp_stop")
-    async def btn_stop(self, ix: discord.Interaction, _: discord.ui.Button):
-        assert ix.guild is not None  # panel only exists in a guild
-        if await self._deny(ix): return
-        try:
-            await ix.response.defer()
-        except Exception as exc:
-            log.error(f"btn_stop: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
-            return
-        try:
-            vc = _vc(ix.guild.voice_client)
-            if vc:
-                vc.stop()
-                await vc.disconnect()
-            gs = get_state(ix.guild.id)
-            gs.streaming  = False
-            gs.started_at = None
-            gs.channel    = "—"
-            gs.desired_channel_id = None   # deliberate stop — don't let the watchdog rejoin
-            _clear_audio_client(ix.guild.id)
-            log.info(f"Stream stopped via panel [{ix.guild.name}]")
-            await self._refresh_panel(ix)
-        except Exception as exc:
-            log.error(f"btn_stop failed [{ix.guild.name}]: {exc}", exc_info=True)
-            await self._error(ix, f"❌ Failed to stop stream: `{exc}`")
-
-    @discord.ui.button(label="🔄 Reconnect", style=discord.ButtonStyle.blurple, custom_id="cp_reconnect")
-    async def btn_reconnect(self, ix: discord.Interaction, _: discord.ui.Button):
-        assert ix.guild is not None  # panel only exists in a guild
-        if await self._deny(ix): return
-        vc = _vc(ix.guild.voice_client)
-        if vc is None:
-            await ix.response.send_message("❌ Not connected.", ephemeral=True)
-            return
-        try:
-            await ix.response.defer()
-        except Exception as exc:
-            log.error(f"btn_reconnect: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
-            return
-        try:
-            gs = get_state(ix.guild.id)
-            vc.stop()
-            await asyncio.sleep(1)
-            _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
-            # User-requested reconnect — deliberately does NOT bump gs.reconnects.
-            log.info(f"Manual reconnect via panel [{ix.guild.name}]")
-            await self._refresh_panel(ix)
-        except Exception as exc:
-            log.error(f"btn_reconnect failed [{ix.guild.name}]: {exc}", exc_info=True)
-            await self._error(ix, f"❌ Reconnect failed: `{exc}`")
-
+    # ── One row, read left-to-right as the workflow ──────────────────────────
+    # Presets first and green (they're the start action — clicking one joins the
+    # repeater's configured channel and streams it), then Reconnect (grey — a
+    # rare manual escape hatch; the watchdog handles reconnects), then Stop (red
+    # — the one destructive control). There is no separate Start button.
 
     async def _switch_via_panel(self, ix: discord.Interaction, preset_id: str) -> Optional[str]:
         """
@@ -1752,9 +1702,7 @@ class ControlPanelView(discord.ui.View):
             log.info(f"Started {preset_id} via panel [{ix.guild.name}]")
         return None
 
-    # ── Row 2: repeater switchers ─────────────────────────────────────────────
-
-    @discord.ui.button(label="📻 VHF 146.745", style=discord.ButtonStyle.blurple, custom_id="cp_vhf")
+    @discord.ui.button(label="📻 VHF 146.745", style=discord.ButtonStyle.green,   custom_id="cp_vhf")
     async def btn_vhf(self, ix: discord.Interaction, _: discord.ui.Button):
         assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
@@ -1773,7 +1721,7 @@ class ControlPanelView(discord.ui.View):
             log.error(f"btn_vhf failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Failed to switch to VHF: `{exc}`")
 
-    @discord.ui.button(label="📡 UHF 448.775", style=discord.ButtonStyle.blurple, custom_id="cp_uhf")
+    @discord.ui.button(label="📡 UHF 448.775", style=discord.ButtonStyle.green,   custom_id="cp_uhf")
     async def btn_uhf(self, ix: discord.Interaction, _: discord.ui.Button):
         assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
@@ -1798,6 +1746,57 @@ class ControlPanelView(discord.ui.View):
         except Exception as exc:
             log.error(f"btn_uhf failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Failed to switch to UHF: `{exc}`")
+
+    @discord.ui.button(label="🔄 Reconnect", style=discord.ButtonStyle.secondary, custom_id="cp_reconnect")
+    async def btn_reconnect(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
+        if await self._deny(ix): return
+        vc = _vc(ix.guild.voice_client)
+        if vc is None:
+            await ix.response.send_message("❌ Not connected.", ephemeral=True)
+            return
+        try:
+            await ix.response.defer()
+        except Exception as exc:
+            log.error(f"btn_reconnect: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
+            return
+        try:
+            gs = get_state(ix.guild.id)
+            vc.stop()
+            await asyncio.sleep(1)
+            _play_paused(vc, _make_source(gs.preset, ix.guild.id), after=lambda e, _vc=vc: _after_play(e, _vc))
+            # User-requested reconnect — deliberately does NOT bump gs.reconnects.
+            log.info(f"Manual reconnect via panel [{ix.guild.name}]")
+            await self._refresh_panel(ix)
+        except Exception as exc:
+            log.error(f"btn_reconnect failed [{ix.guild.name}]: {exc}", exc_info=True)
+            await self._error(ix, f"❌ Reconnect failed: `{exc}`")
+
+    @discord.ui.button(label="⏹ Stop",      style=discord.ButtonStyle.red,       custom_id="cp_stop")
+    async def btn_stop(self, ix: discord.Interaction, _: discord.ui.Button):
+        assert ix.guild is not None  # panel only exists in a guild
+        if await self._deny(ix): return
+        try:
+            await ix.response.defer()
+        except Exception as exc:
+            log.error(f"btn_stop: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
+            return
+        try:
+            vc = _vc(ix.guild.voice_client)
+            if vc:
+                vc.stop()
+                await vc.disconnect()
+            gs = get_state(ix.guild.id)
+            gs.streaming  = False
+            gs.started_at = None
+            gs.channel    = "—"
+            gs.desired_channel_id = None   # deliberate stop — don't let the watchdog rejoin
+            _clear_audio_client(ix.guild.id)
+            log.info(f"Stream stopped via panel [{ix.guild.name}]")
+            await self._refresh_panel(ix)
+        except Exception as exc:
+            log.error(f"btn_stop failed [{ix.guild.name}]: {exc}", exc_info=True)
+            await self._error(ix, f"❌ Failed to stop stream: `{exc}`")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2954,7 +2953,7 @@ async def help_cmd(ctx: commands.Context):
     e.add_field(
         name="🎛️ Control Panel",
         value=(
-            "`/panel` — Post the button panel (⏹ Stop · 🔄 · 📻 VHF · 📡 UHF — a preset button starts the stream)\n"
+            "`/panel` — Post the button panel (📻 VHF · 📡 UHF · 🔄 · ⏹ Stop — a preset button starts the stream)\n"
             "`/repeater-status` — Live repeater/stream status + linked nodes (ephemeral)"
         ),
         inline=False,
