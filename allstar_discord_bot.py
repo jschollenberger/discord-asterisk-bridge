@@ -2073,14 +2073,22 @@ async def on_voice_state_update(
         )
         return
 
-    # True disconnect (admin kick, network loss with no recovery, /leave)
+    # True disconnect. A deliberate teardown (/leave or the panel Stop button)
+    # already cleared desired_channel_id before disconnecting, so if it's None
+    # here this was intentional — log it at INFO. If it still holds a channel,
+    # the drop was unexpected (admin kick, network loss with no recovery) and
+    # is worth a WARNING (the watchdog cares about exactly this case).
     gs = get_state(guild.id)
+    was_intentional = gs.desired_channel_id is None
     gs.streaming  = False
     gs.started_at = None
     gs.channel    = "—"
     gs.desired_channel_id = None   # Discord confirmed a clean disconnect — don't rejoin
     _clear_audio_client(guild.id)
-    log.warning(f"Bot truly disconnected from '{channel_name}' [{guild.name}]")
+    if was_intentional:
+        log.info(f"Bot disconnected from '{channel_name}' (deliberate stop) [{guild.name}]")
+    else:
+        log.warning(f"Bot truly disconnected from '{channel_name}' [{guild.name}]")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Core Join Logic

@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps its red danger cue at the end.
 
 ### Fixed
+- **A deliberate Stop was logged as a scary `WARNING`.** Pressing the panel
+  **Stop** button (or `/leave`) tore the voice link down and then logged `Bot
+  truly disconnected …` at `WARNING` — the same level as an unexpected drop —
+  making normal operation look alarming in the logs. A deliberate teardown
+  already clears the watchdog's rejoin target before disconnecting, so that now
+  logs at `INFO`; a genuine unexpected disconnect (admin kick, network loss)
+  still warns.
 - **A rejected SIP registration retried every ~3 s with no back-off.** When the
   far-end Asterisk was up but rejecting (wrong credentials, missing peer), the
   monitor hammered it with a fresh REGISTER every few seconds — noisy, and
