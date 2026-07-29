@@ -1878,7 +1878,8 @@ async def on_interaction(interaction: discord.Interaction) -> None:
         )
     elif itype == discord.InteractionType.component:
         custom_id = data.get("custom_id", "?")
-        log.info(f"BUTTON  {custom_id}  ·  {user} ({user.id})  ·  #{channel} [{guild}]")
+        msg_id = getattr(interaction.message, "id", "?")
+        log.info(f"BUTTON  {custom_id}  ·  {user} ({user.id})  ·  msg={msg_id}  ·  #{channel} [{guild}]")
     elif itype == discord.InteractionType.autocomplete:
         cmd_name = data.get("name", "?")
         log.debug(f"AUTOCOMPLETE  /{cmd_name}  ·  {user}  ·  [{guild}]")
@@ -1906,6 +1907,7 @@ async def on_ready():
     _loop = asyncio.get_running_loop()
 
     bot.add_view(_panel_view)
+    log.debug(f"Control panel view registered (persistent={_panel_view.is_persistent()})")
 
     # Sync slash commands to the primary guild (instant).
     # Global sync is intentionally omitted: it takes up to 1 hour to propagate
@@ -2208,7 +2210,21 @@ async def repeater_status_cmd(ctx: commands.Context):
 @commands.guild_only()
 async def panel_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
-    await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
+    msg = await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
+    # Bind the persistent view to THIS specific message. A panel posted via the
+    # slash /panel goes out as an interaction response, and (observed live) the
+    # button clicks reached on_interaction but never the view callback — i.e. the
+    # custom_id-only persistent registration wasn't dispatching. A message-scoped
+    # binding is matched ahead of that fallback and should make the buttons fire.
+    msg_id = getattr(msg, "id", None)
+    if msg_id is not None:
+        try:
+            bot.add_view(_panel_view, message_id=msg_id)
+            log.debug(f"Panel posted; view bound to message {msg_id} [{ctx.guild.name}]")
+        except Exception:
+            log.debug("Panel view message-bind failed", exc_info=True)
+    else:
+        log.debug("Panel posted but ctx.send returned no message id — view on persistent registration only")
 
 
 @bot.hybrid_command(name="repeater-info", description="Show repeater information (frequencies, PL tones, location).")
