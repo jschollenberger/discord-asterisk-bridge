@@ -1882,8 +1882,7 @@ async def on_interaction(interaction: discord.Interaction) -> None:
         )
     elif itype == discord.InteractionType.component:
         custom_id = data.get("custom_id", "?")
-        msg_id = getattr(interaction.message, "id", "?")
-        log.info(f"BUTTON  {custom_id}  ·  {user} ({user.id})  ·  msg={msg_id}  ·  #{channel} [{guild}]")
+        log.info(f"BUTTON  {custom_id}  ·  {user} ({user.id})  ·  #{channel} [{guild}]")
     elif itype == discord.InteractionType.autocomplete:
         cmd_name = data.get("name", "?")
         log.debug(f"AUTOCOMPLETE  /{cmd_name}  ·  {user}  ·  [{guild}]")
@@ -1917,7 +1916,6 @@ async def on_ready():
     if _panel_view is None:
         _panel_view = ControlPanelView()
     bot.add_view(_panel_view)
-    log.debug(f"Control panel view registered (persistent={_panel_view.is_persistent()})")
 
     # Sync slash commands to the primary guild (instant).
     # Global sync is intentionally omitted: it takes up to 1 hour to propagate
@@ -2221,19 +2219,7 @@ async def repeater_status_cmd(ctx: commands.Context):
 async def panel_cmd(ctx: commands.Context):
     assert ctx.guild is not None    # guaranteed by @commands.guild_only()
     assert _panel_view is not None  # created in on_ready before any command runs
-    msg = await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
-    # Also bind the view to THIS specific message id (belt-and-suspenders — the
-    # actual dispatch fix is instantiating the view inside the loop, see
-    # on_ready). Harmless and slightly more robust for reposted panels.
-    msg_id = getattr(msg, "id", None)
-    if msg_id is not None:
-        try:
-            bot.add_view(_panel_view, message_id=msg_id)
-            log.debug(f"Panel posted; view bound to message {msg_id} [{ctx.guild.name}]")
-        except Exception:
-            log.debug("Panel view message-bind failed", exc_info=True)
-    else:
-        log.debug("Panel posted but ctx.send returned no message id — view on persistent registration only")
+    await ctx.send(embed=_status_embed(ctx.guild.id), view=_panel_view)
 
 
 @bot.hybrid_command(name="repeater-info", description="Show repeater information (frequencies, PL tones, location).")
