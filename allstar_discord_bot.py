@@ -2599,63 +2599,76 @@ async def _ami_check(ctx: commands.Context) -> bool:
     return True
 
 
-@bot.hybrid_command(name="link-repeaters", description="Link the VHF and UHF repeaters together.")
+def _link_plan(repeaters: list[Any]) -> tuple[Any, list[Any], Optional[str]]:
+    """Plan a cross-repeater link over an arbitrary set of repeaters.
+
+    Returns (hub, targets, error). The hub is the repeater whose AMI issues the
+    ilink commands (the first linkable one that has an `ami` block); targets are
+    the other linkable repeaters, each of which gets linked to the hub by node.
+    A linkable repeater is enabled and has an `allstar_node`. Pure and
+    parameterised so it can be unit-tested with any number of repeaters (this is
+    what lets /link-repeaters work for one club with two repeaters and another
+    with five). error is a user-facing string when a link isn't possible."""
+    linkable = [r for r in repeaters if r.enabled and r.allstar_node]
+    if len(linkable) < 2:
+        return None, [], "❌ Need at least two repeaters with `allstar_node` configured to link them."
+    hub = next((r for r in linkable if r.ami), None)
+    if hub is None:
+        return None, [], "❌ No repeater has an `ami` block configured to control the link."
+    targets = [r for r in linkable if r is not hub]
+    return hub, targets, None
+
+
+@bot.hybrid_command(name="link-repeaters", description="Link all configured repeaters together.")
 @app_commands.default_permissions()
 @commands.guild_only()
 async def link_repeaters_cmd(ctx: commands.Context):
-    """Links VHF node 50420 ↔ UHF node 53209 via the VHF AMI."""
+    """Link every repeater with an allstar_node to the hub (the first repeater
+    with an AMI) via `ilink 13` — a standing, transceive link — per target."""
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _ami_check(ctx): return
-    vhf = cfg.repeater_by_id("vhf")
-    uhf = cfg.repeater_by_id("uhf")
-    if not vhf or not uhf or not vhf.ami or not vhf.allstar_node or not uhf.allstar_node:
-        return await ctx.send(
-            "❌ Both repeaters must have `allstar_node` and `ami` configured in config.yaml.",
-            ephemeral=True,
-        )
+    hub, targets, err = _link_plan(cfg.repeaters)
+    if err:
+        return await ctx.send(err, ephemeral=True)
     await ctx.defer()
     try:
-        client = AMIClient(vhf.ami.host, vhf.ami.port, vhf.ami.username, vhf.ami.password)
-        # ilink 13 = permanently connect specified link, transceive. Matches
-        # this club's own [functions53209] DTMF entry 83 for the same
-        # VHF<->UHF bridge ("cmd,...rpt cmd 53209 ilink 13 50420") — using
-        # "permanent" here, not the plain ilink 3, mirrors their own config's
-        # intent that this is a standing link, not a transient session one.
-        await client.ilink(vhf.allstar_node, f"13 {uhf.allstar_node}")
-        log.info(f"Link repeaters: {vhf.allstar_node} → {uhf.allstar_node} [{ctx.guild.name}]")
+        client = AMIClient(hub.ami.host, hub.ami.port, hub.ami.username, hub.ami.password)
+        # ilink 13 = permanently connect the specified link, transceive (a
+        # standing link, not a transient ilink 3 session). Issued on the hub's
+        # node once per target node, building a star with the hub at the centre;
+        # AllStar linking is transitive, so all repeaters end up bridged.
+        for t in targets:
+            await client.ilink(hub.allstar_node, f"13 {t.allstar_node}")
+            log.info(f"Link repeaters: {hub.allstar_node} → {t.allstar_node} [{ctx.guild.name}]")
+        joined = "\n".join(f"↔ **{t.display_name}** (Node `{t.allstar_node}`)" for t in targets)
         await ctx.send(
-            f"🔗 Linking **{vhf.display_name}** (Node `{vhf.allstar_node}`) "
-            f"↔ **{uhf.display_name}** (Node `{uhf.allstar_node}`)"
+            f"🔗 Linking everything to **{hub.display_name}** (Node `{hub.allstar_node}`):\n{joined}"
         )
     except Exception as exc:
         log.error(f"link-repeaters failed: {exc}")
         await ctx.send(f"❌ AMI error: `{exc}`")
 
 
-@bot.hybrid_command(name="unlink-repeaters", description="Unlink the VHF and UHF repeaters.")
+@bot.hybrid_command(name="unlink-repeaters", description="Unlink all configured repeaters from each other.")
 @app_commands.default_permissions()
 @commands.guild_only()
 async def unlink_repeaters_cmd(ctx: commands.Context):
     assert ctx.guild is not None  # guaranteed by @commands.guild_only()
     if not await _ami_check(ctx): return
-    vhf = cfg.repeater_by_id("vhf")
-    uhf = cfg.repeater_by_id("uhf")
-    if not vhf or not uhf or not vhf.ami or not vhf.allstar_node or not uhf.allstar_node:
-        return await ctx.send(
-            "❌ Both repeaters must have `allstar_node` and `ami` configured in config.yaml.",
-            ephemeral=True,
-        )
+    hub, targets, err = _link_plan(cfg.repeaters)
+    if err:
+        return await ctx.send(err, ephemeral=True)
     await ctx.defer()
     try:
-        client = AMIClient(vhf.ami.host, vhf.ami.port, vhf.ami.username, vhf.ami.password)
+        client = AMIClient(hub.ami.host, hub.ami.port, hub.ami.username, hub.ami.password)
         # ilink 11 = disconnect a previously permanently connected link — the
-        # counterpart to ilink 13 above. Matches [functions53209] entry 84
-        # ("cmd,...rpt cmd 53209 ilink 11 50420").
-        await client.ilink(vhf.allstar_node, f"11 {uhf.allstar_node}")
-        log.info(f"Unlink repeaters: {vhf.allstar_node} ✗ {uhf.allstar_node} [{ctx.guild.name}]")
+        # counterpart to ilink 13 above — issued per target node.
+        for t in targets:
+            await client.ilink(hub.allstar_node, f"11 {t.allstar_node}")
+            log.info(f"Unlink repeaters: {hub.allstar_node} ✗ {t.allstar_node} [{ctx.guild.name}]")
+        dropped = "\n".join(f"✗ **{t.display_name}** (Node `{t.allstar_node}`)" for t in targets)
         await ctx.send(
-            f"🔌 Unlinked **{vhf.display_name}** (Node `{vhf.allstar_node}`) "
-            f"from **{uhf.display_name}** (Node `{uhf.allstar_node}`)"
+            f"🔌 Unlinking everything from **{hub.display_name}** (Node `{hub.allstar_node}`):\n{dropped}"
         )
     except Exception as exc:
         log.error(f"unlink-repeaters failed: {exc}")
@@ -3026,8 +3039,6 @@ async def help_cmd(ctx: commands.Context):
     """Organised command reference for the Discord Repeater Bot."""
     callsign = cfg.club.callsign
     prefix   = cfg.bot.prefix
-    vhf_node = next((r.allstar_node for r in cfg.repeaters if r.id == "vhf"), "?")
-    uhf_node = next((r.allstar_node for r in cfg.repeaters if r.id == "uhf"), "?")
 
     e = discord.Embed(
         title       = f"📖 {BOT_NAME} — Command Reference",
@@ -3071,8 +3082,8 @@ async def help_cmd(ctx: commands.Context):
     e.add_field(
         name="📡 Repeater Control  *(operator role)*",
         value=(
-            f"`/link-repeaters` — Link VHF (Node {vhf_node}) ↔ UHF (Node {uhf_node})\n"
-            "`/unlink-repeaters` — Unlink VHF and UHF\n"
+            "`/link-repeaters` — Link all configured repeaters together\n"
+            "`/unlink-repeaters` — Unlink all configured repeaters\n"
             "`/link <node>` — Link active repeater to any AllStar node\n"
             "`/unlink <node>` — Unlink from a specific node\n"
             "`/unlink-all` — Disconnect all links on active repeater\n"

@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   description. Ids that aren't valid slash-command names, or that collide with a
   built-in command, are skipped with a warning and stay reachable via `/stream`.
   `/help`'s streaming section lists whatever shortcuts actually exist.
+- **`/link-repeaters` and `/unlink-repeaters` now work for any number of
+  repeaters**, not just a hardcoded VHF↔UHF pair. They link every repeater that
+  has an `allstar_node` to a hub (the first repeater with an `ami` block) via
+  `ilink 13`/`11` per target, building a transitive star so all repeaters end
+  up bridged. Clear messages when fewer than two repeaters have a node, or when
+  none has an AMI. `/help` describes them generically (no hardcoded node
+  numbers). Completes the removal of the two-repeater / `vhf`/`uhf` assumptions.
 
 ### Fixed
 - **Starting the bot without a `config.yaml` now prints a clear message instead
