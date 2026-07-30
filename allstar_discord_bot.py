@@ -33,6 +33,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import re
 import signal
 import sys
 import threading
@@ -139,6 +140,7 @@ _satellites: dict[str, "SatelliteBot"] = {}   # rpt_id → bot
 # Global bot-start timestamp (process lifetime, not per guild)
 _bot_started: float = datetime.now(timezone.utc).timestamp()
 _global_cmds_purged: bool = False   # see on_ready — one-shot stale-command purge
+_repeater_cmds_registered: bool = False   # see on_ready — one-shot /<id> shortcut registration
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
 # Strong references to fire-and-forget background tasks. asyncio only holds a
@@ -1969,6 +1971,14 @@ async def on_ready():
         _panel_view = ControlPanelView()
     bot.add_view(_panel_view)
 
+    # Register the per-repeater /<id> shortcut commands once, before syncing,
+    # now that every built-in command is defined (collision detection needs
+    # their names). Guarded so gateway reconnects don't try to re-add them.
+    global _repeater_cmds_registered
+    if not _repeater_cmds_registered:
+        _repeater_cmds_registered = True
+        _register_repeater_commands()
+
     # Sync slash commands to the primary guild (instant).
     # Global sync is intentionally omitted: it takes up to 1 hour to propagate
     # and causes every command to appear twice (once guild-specific, once global)
@@ -2294,7 +2304,7 @@ async def repeater_info_cmd(ctx: commands.Context):
 
 async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
     """
-    Shared logic for /vhf, /uhf, and /stream.
+    Shared logic for /stream and the generated per-repeater /<id> shortcuts.
     - If the bot is playing in this guild: swap the stream immediately.
     - If the user is in a voice channel but bot isn't: join and start.
     - Otherwise: set the preset so the next /join (or a panel preset button) uses it.
@@ -2374,16 +2384,52 @@ async def _switch_to_preset(ctx: commands.Context, preset_id: str) -> None:
         )
 
 
-@bot.hybrid_command(name="vhf", description="Switch to (or start) the VHF repeater — 146.745 MHz.")
-@commands.guild_only()
-async def vhf_cmd(ctx: commands.Context):
-    await _switch_to_preset(ctx, "vhf")
+# Per-repeater shortcut commands (/vhf, /uhf, /main, /hf40, …) are generated
+# from config rather than hardcoded, so every club gets one /<id> per repeater
+# named after its own config id — instead of two commands wired to "vhf"/"uhf".
+# Discord slash-command names must be 1–32 chars of letters/digits/underscore/
+# dash (lowercase); ids that don't fit, or that collide with a built-in command,
+# are skipped (still reachable via /stream <id>). See _register_repeater_commands.
+_SLASH_NAME_RE = re.compile(r"^[\w-]+$")   # \w is Unicode letters/digits/_ for str patterns
+
+# Populated by _register_repeater_commands(): (slash_name, description, rpt_id)
+# for each shortcut actually registered. /help reads it to list the shortcuts.
+_repeater_commands: list[tuple[str, str, str]] = []
 
 
-@bot.hybrid_command(name="uhf", description="Switch to (or start) the UHF repeater — 448.775 MHz.")
-@commands.guild_only()
-async def uhf_cmd(ctx: commands.Context):
-    await _switch_to_preset(ctx, "uhf")
+def _build_repeater_command_specs(reserved: set[str]) -> list[tuple[str, str, str]]:
+    """Decide which /<id> shortcut commands to register: one per playable
+    repeater (see _panel_presets) whose id is a valid, non-colliding slash
+    name. Pure — takes the already-used command names — so it's unit-testable
+    without touching the live command tree."""
+    specs: list[tuple[str, str, str]] = []
+    used = set(reserved)
+    for rpt in _panel_presets():
+        name = rpt.id.lower()
+        if not (1 <= len(name) <= 32) or not _SLASH_NAME_RE.match(name):
+            log.warning(f"No /{rpt.id} shortcut command — '{rpt.id}' isn't a valid slash-command name; use /stream {rpt.id}.")
+            continue
+        if name in used:
+            log.warning(f"No /{name} shortcut command — that name is already taken; use /stream {rpt.id}.")
+            continue
+        freq = f" — {rpt.frequency_mhz:.3f} MHz" if rpt.frequency_mhz else ""
+        specs.append((name, f"Switch to (or start) {rpt.display_name}{freq}."[:100], rpt.id))
+        used.add(name)
+    return specs
+
+
+def _register_repeater_commands() -> None:
+    """Register the per-repeater /<id> shortcut commands. Called once, in
+    on_ready, before the command sync (so it runs after every built-in command
+    is defined and their names are known for collision detection)."""
+    global _repeater_commands
+    _repeater_commands = _build_repeater_command_specs({c.name for c in bot.commands})
+    for name, desc, rpt_id in _repeater_commands:
+        async def _cmd(ctx: commands.Context, _rid: str = rpt_id):
+            await _switch_to_preset(ctx, _rid)
+        _cmd.__name__ = f"repeater_cmd_{name}"
+        bot.hybrid_command(name=name, description=desc)(commands.guild_only()(_cmd))  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
+        log.info(f"Registered repeater shortcut command /{name} → '{rpt_id}'")
 
 
 @bot.hybrid_command(name="stream", description="Switch to a named stream preset.")  # type: ignore[arg-type]  # discord.py hybrid_command param-callback stub limitation
@@ -2995,19 +3041,23 @@ async def help_cmd(ctx: commands.Context):
     # Each section is ONE field — well within Discord's 25-field embed limit
     # and leaves plenty of room for future commands.
 
-    e.add_field(
-        name="📻 Streaming",
-        value=(
-            "`/join` — Join your voice channel and start streaming\n"
-            "`/leave` — Stop the stream and disconnect\n"
-            "`/vhf` — Switch to (or start) VHF 146.745 MHz\n"
-            "`/uhf` — Switch to (or start) UHF 448.775 MHz\n"
-            "`/stream <name>` — Switch to any named preset (autocomplete)\n"
-            "`/reconnect` — Force-restart the audio stream\n"
-            "`/presets` — List all configured stream presets"
-        ),
-        inline=False,
-    )
+    stream_lines = [
+        "`/join` — Join your voice channel and start streaming",
+        "`/leave` — Stop the stream and disconnect",
+    ]
+    # One line per generated /<id> shortcut (see _register_repeater_commands),
+    # so /help reflects whatever repeaters this club actually runs.
+    for name, _desc, rpt_id in _repeater_commands:
+        rpt = cfg.repeater_by_id(rpt_id)
+        freq = f" {rpt.frequency_mhz:.3f} MHz" if (rpt and rpt.frequency_mhz) else ""
+        disp = rpt.display_name if rpt else rpt_id
+        stream_lines.append(f"`/{name}` — Switch to (or start) {disp}{freq}")
+    stream_lines += [
+        "`/stream <name>` — Switch to any named preset (autocomplete)",
+        "`/reconnect` — Force-restart the audio stream",
+        "`/presets` — List all configured stream presets",
+    ]
+    e.add_field(name="📻 Streaming", value="\n".join(stream_lines), inline=False)
 
     e.add_field(
         name="🎛️ Control Panel",

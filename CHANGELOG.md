@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config `id`, with Reconnect and Stop pinned to the bottom row. First step in
   removing the assumption that every deployment has exactly two repeaters named
   `vhf`/`uhf`.
+- **The per-repeater shortcut commands are now generated from config too.** The
+  hardcoded `/vhf` and `/uhf` are gone; instead the bot registers one `/<id>`
+  command per playable repeater, named after its config `id` (so a club with
+  `main`, `hf40` repeaters gets `/main`, `/hf40`), with the frequency in the
+  description. Ids that aren't valid slash-command names, or that collide with a
+  built-in command, are skipped with a warning and stay reachable via `/stream`.
+  `/help`'s streaming section lists whatever shortcuts actually exist.
 
 ## [1.2.0] — 2026-07-29
 
