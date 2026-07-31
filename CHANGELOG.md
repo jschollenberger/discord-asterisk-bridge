@@ -12,7 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > they refer to that pre-release internal numbering, not to any published
 > release.
 
-## [Unreleased]
+## [1.3.0] — 2026-07-31
+
+Multi-repeater support — the panel, the shortcut commands, and link/unlink are
+now generated from config, so a club with any number of repeaters (not just a
+VHF/UHF pair) works with zero code edits — plus a friendlier first-run error.
 
 ### Changed
 - **The control panel's preset buttons are now generated from config**, one per
@@ -395,7 +399,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.5...v1.2.0
 [1.1.5]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.3...v1.1.4
