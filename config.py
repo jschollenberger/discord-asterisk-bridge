@@ -23,9 +23,10 @@ Usage:
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import NoReturn, Optional
 
 import yaml
 
@@ -34,6 +35,12 @@ import yaml
 BOT_VERSION = "1.2.0"
 
 CONFIG_PATH = Path("config.yaml")
+
+
+class ConfigError(Exception):
+    """A problem with config.yaml that the user needs to fix (missing file,
+    invalid YAML, a missing/invalid setting). Carries a message written for a
+    human, so callers can present it without a traceback."""
 
 
 # ─── Dataclasses ──────────────────────────────────────────────────────────────
@@ -332,11 +339,20 @@ class Config:
 
 def load(path: Path = CONFIG_PATH) -> Config:
     if not path.exists():
-        raise FileNotFoundError(
-            f"{path} not found. Copy config.example.yaml to {path.name} and fill in "
-            f"your own values (bot token, AMI passwords, etc.) before running the bot."
+        raise ConfigError(
+            f"{path.name} not found.\n"
+            f"Copy config.example.yaml to {path.name} and fill in your own values "
+            f"(bot token, AMI passwords, etc.) before running the bot."
         )
-    raw = yaml.safe_load(path.read_text())
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"{path.name} isn't valid YAML:\n{exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            f"{path.name} is empty or malformed — expected a top-level mapping of "
+            f"settings. Compare it against config.example.yaml."
+        )
 
     b = raw["bot"]
     bot_cfg = BotConfig(
@@ -491,5 +507,28 @@ def load(path: Path = CONFIG_PATH) -> Config:
     )
 
 
+def _exit_with_config_error(message: str) -> NoReturn:
+    """Print a friendly, traceback-free configuration error and exit.
+
+    load() runs at import time (below), so an unhandled exception here surfaces
+    as a Python traceback through `from config import cfg` — intimidating for
+    what is usually just a missing or mistyped config.yaml. Instead we print the
+    message on its own and exit non-zero. (load() still *raises* ConfigError, so
+    it stays usable/testable programmatically; this only shapes the import-time
+    singleton's failure.)"""
+    print(f"\n⚠️  Configuration error\n\n{message}\n", file=sys.stderr)
+    sys.exit(1)
+
+
 # Module-level singleton
-cfg: Config = load()
+try:
+    cfg: Config = load()
+except ConfigError as exc:
+    _exit_with_config_error(str(exc))
+except (KeyError, ValueError, TypeError) as exc:
+    # A missing required key or an unparseable value slipped through load()'s
+    # own checks — still a config problem, not a bug worth a stack trace.
+    _exit_with_config_error(
+        f"config.yaml has a missing or invalid setting: {exc!r}.\n"
+        f"Compare it against config.example.yaml for the expected structure."
+    )

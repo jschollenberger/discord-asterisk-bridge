@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removing the assumption that every deployment has exactly two repeaters named
   `vhf`/`uhf`.
 
+### Fixed
+- **Starting the bot without a `config.yaml` now prints a clear message instead
+  of a Python traceback.** Config loads at import time, so a missing or
+  malformed file surfaced as a scary stack trace ending in `FileNotFoundError`.
+  `config.py` now raises a typed `ConfigError` with a human-readable message
+  (missing file, invalid YAML, or a missing/invalid setting), and the import
+  fails with just that message and a non-zero exit — no traceback. `load()`
+  still raises programmatically, so it stays testable.
+
 ## [1.2.0] — 2026-07-29
 
 A control-panel UX overhaul — presets self-start, a one-row layout, and a
