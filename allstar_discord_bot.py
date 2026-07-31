@@ -42,7 +42,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
-from typing import Any, ClassVar, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, ClassVar, Optional, TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -1574,9 +1574,51 @@ def _info_embed(guild_id: Optional[int] = None) -> discord.Embed:
 # Control Panel View  (persistent across bot restarts)
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Discord's action-row grid is 5 rows × 5 buttons. Reconnect/Stop occupy the
+# bottom row (row 4), leaving rows 0–3 for preset buttons. A club with more
+# playable repeaters than that reaches the rest via /stream and /presets.
+_PANEL_MAX_PRESETS = 20
+
+
+def _panel_presets() -> list[Any]:
+    """Repeaters the control panel offers as start/switch buttons: enabled,
+    with an audio path, and streamable on this (primary) bot — i.e. not a
+    dedicated satellite that runs on its own token in its own channel. This is
+    what makes the panel adapt to any number of repeaters instead of assuming
+    a fixed VHF/UHF pair."""
+    presets = [
+        r for r in cfg.repeaters
+        if r.enabled and r.sip_audio and not r.discord.is_dedicated(cfg.bot.token)
+    ]
+    return presets[:_PANEL_MAX_PRESETS]
+
+
 class ControlPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        # Build one green preset button per playable repeater, straight from
+        # config, so the panel adapts to however many repeaters a club runs
+        # (one, three, none) instead of assuming a fixed VHF/UHF pair. Reconnect
+        # and Stop are declared below with row=4 so they always sit at the
+        # bottom, leaving rows 0–3 for presets.
+        for idx, rpt in enumerate(_panel_presets()):
+            btn: discord.ui.Button[Any] = discord.ui.Button(
+                label=self._preset_label(rpt),
+                style=discord.ButtonStyle.green,
+                custom_id=f"cp_preset_{rpt.id}",
+                row=idx // 5,
+            )
+            btn.callback = self._make_preset_callback(rpt.id)
+            self.add_item(btn)
+
+    @staticmethod
+    def _preset_label(rpt: Any) -> str:
+        """Discord button label for a preset — display name plus frequency when
+        one is configured (e.g. '📻 VHF 146.745'). Clamped to Discord's limit."""
+        label = f"📻 {rpt.display_name}"
+        if rpt.frequency_mhz:
+            label = f"{label} {rpt.frequency_mhz:.3f}"
+        return label[:80]
 
     async def on_error(
         self,
@@ -1702,52 +1744,36 @@ class ControlPanelView(discord.ui.View):
             log.info(f"Started {preset_id} via panel [{ix.guild.name}]")
         return None
 
-    @discord.ui.button(label="📻 VHF 146.745", style=discord.ButtonStyle.green,   custom_id="cp_vhf")
-    async def btn_vhf(self, ix: discord.Interaction, _: discord.ui.Button):
+    async def _preset_pressed(self, ix: discord.Interaction, preset_id: str) -> None:
+        """Shared handler for every dynamically-built preset button — start the
+        repeater if idle, or switch to it if already streaming (see
+        _switch_via_panel). A button only exists for a playable repeater, so
+        there's no per-press 'audio not configured' guard to do here."""
         assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
         try:
             await ix.response.defer()
         except Exception as exc:
-            log.error(f"btn_vhf: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
+            log.error(f"cp_preset_{preset_id}: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
             return
         try:
-            note = await self._switch_via_panel(ix, "vhf")
+            note = await self._switch_via_panel(ix, preset_id)
             if note is not None:
                 await ix.followup.send(note, ephemeral=True)
                 return
             await self._refresh_panel(ix)
         except Exception as exc:
-            log.error(f"btn_vhf failed [{ix.guild.name}]: {exc}", exc_info=True)
-            await self._error(ix, f"❌ Failed to switch to VHF: `{exc}`")
+            log.error(f"cp_preset_{preset_id} failed [{ix.guild.name}]: {exc}", exc_info=True)
+            await self._error(ix, f"❌ Failed to switch to {preset_id}: `{exc}`")
 
-    @discord.ui.button(label="📡 UHF 448.775", style=discord.ButtonStyle.green,   custom_id="cp_uhf")
-    async def btn_uhf(self, ix: discord.Interaction, _: discord.ui.Button):
-        assert ix.guild is not None  # panel only exists in a guild
-        if await self._deny(ix): return
-        uhf_rpt = cfg.repeater_by_id("uhf")
-        if not uhf_rpt or not uhf_rpt.sip_audio:
-            await ix.response.send_message(
-                "⚫ UHF audio not yet configured. Add a `sip_audio:` block under `uhf:` in config.yaml.",
-                ephemeral=True,
-            )
-            return
-        try:
-            await ix.response.defer()
-        except Exception as exc:
-            log.error(f"btn_uhf: defer failed [{ix.guild.name}]: {exc}", exc_info=True)
-            return
-        try:
-            note = await self._switch_via_panel(ix, "uhf")
-            if note is not None:
-                await ix.followup.send(note, ephemeral=True)
-                return
-            await self._refresh_panel(ix)
-        except Exception as exc:
-            log.error(f"btn_uhf failed [{ix.guild.name}]: {exc}", exc_info=True)
-            await self._error(ix, f"❌ Failed to switch to UHF: `{exc}`")
+    def _make_preset_callback(self, preset_id: str) -> Callable[[discord.Interaction], Awaitable[None]]:
+        """Bind a preset id to the shared handler for a dynamically-added
+        button (its .callback is invoked with just the interaction)."""
+        async def _cb(ix: discord.Interaction) -> None:
+            await self._preset_pressed(ix, preset_id)
+        return _cb
 
-    @discord.ui.button(label="🔄 Reconnect", style=discord.ButtonStyle.secondary, custom_id="cp_reconnect")
+    @discord.ui.button(label="🔄 Reconnect", style=discord.ButtonStyle.secondary, custom_id="cp_reconnect", row=4)
     async def btn_reconnect(self, ix: discord.Interaction, _: discord.ui.Button):
         """
         Recovery button — the manual counterpart to the watchdog's force-rejoin.
@@ -1811,7 +1837,7 @@ class ControlPanelView(discord.ui.View):
             log.error(f"btn_reconnect failed [{ix.guild.name}]: {exc}", exc_info=True)
             await self._error(ix, f"❌ Reconnect failed: `{exc}`")
 
-    @discord.ui.button(label="⏹ Stop",      style=discord.ButtonStyle.red,       custom_id="cp_stop")
+    @discord.ui.button(label="⏹ Stop",      style=discord.ButtonStyle.red,       custom_id="cp_stop", row=4)
     async def btn_stop(self, ix: discord.Interaction, _: discord.ui.Button):
         assert ix.guild is not None  # panel only exists in a guild
         if await self._deny(ix): return
@@ -2986,7 +3012,7 @@ async def help_cmd(ctx: commands.Context):
     e.add_field(
         name="🎛️ Control Panel",
         value=(
-            "`/panel` — Post the button panel (📻 VHF · 📡 UHF · 🔄 · ⏹ Stop — a preset button starts the stream)\n"
+            "`/panel` — Post the button panel (one 📻 button per repeater · 🔄 Reconnect · ⏹ Stop — a preset button starts the stream)\n"
             "`/repeater-status` — Live repeater/stream status + linked nodes (ephemeral)"
         ),
         inline=False,

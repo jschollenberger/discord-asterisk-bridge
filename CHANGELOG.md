@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > they refer to that pre-release internal numbering, not to any published
 > release.
 
+## [Unreleased]
+
+### Changed
+- **The control panel's preset buttons are now generated from config**, one per
+  playable repeater, instead of two hardcoded VHF/UHF buttons. A club running
+  one repeater, or three, or none now gets a panel that matches — each button is
+  labelled from the repeater's `display_name` and frequency and keyed to its
+  config `id`, with Reconnect and Stop pinned to the bottom row. First step in
+  removing the assumption that every deployment has exactly two repeaters named
+  `vhf`/`uhf`.
+
 ## [1.2.0] — 2026-07-29
 
 A control-panel UX overhaul — presets self-start, a one-row layout, and a
