@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > they refer to that pre-release internal numbering, not to any published
 > release.
 
+## [Unreleased]
+
+### Fixed
+- **A transmission that started right as the previous one ended could record
+  but never relay into Discord.** With rapid back-to-back segments (e.g. the
+  weekly ARRL audio news), a new transmission could begin while the previous
+  one's *deferred* pause was still draining its buffered tail. Because playback
+  was still "playing" (not yet paused), the new transmission's start edge didn't
+  resume anything and didn't cancel the pending pause — so when the tail
+  finished draining, playback paused *on top of* the live transmission and never
+  got another start edge to resume it. The result: the segment played on the
+  repeater and got a recording in the activity channel, but was silent in the
+  voice channel for its whole duration. `read_frame` now skips a pending pause
+  when the repeater is voice-active again, so a back-to-back transmission keeps
+  playing.
+
 ## [1.3.0] — 2026-07-31
 
 Multi-repeater support — the panel, the shortcut commands, and link/unlink are

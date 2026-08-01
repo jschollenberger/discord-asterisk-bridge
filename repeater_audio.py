@@ -484,12 +484,25 @@ class RepeaterAudioClient:
         except IndexError:
             if self._pause_pending:
                 self._pause_pending = False
-                log.debug(f"SIP [{self.extension}]: playback buffer drained — requesting pause")
-                if self._on_drained is not None:
-                    try:
-                        self._on_drained()
-                    except Exception:
-                        log.exception(f"on_drained callback failed [{self.extension}]")
+                if self._voice_active:
+                    # A new transmission started before the previous one's
+                    # deferred pause could drain (rapid back-to-back segments,
+                    # e.g. the ARRL audio news). The pause is now stale: firing
+                    # it would pause playback out from under the live
+                    # transmission, which then never gets another start edge to
+                    # resume it — so it records but is never relayed. Skip it;
+                    # playback stays live for the new transmission.
+                    log.debug(
+                        f"SIP [{self.extension}]: buffer drained but a new transmission "
+                        f"is active — skipping the stale pause"
+                    )
+                else:
+                    log.debug(f"SIP [{self.extension}]: playback buffer drained — requesting pause")
+                    if self._on_drained is not None:
+                        try:
+                            self._on_drained()
+                        except Exception:
+                            log.exception(f"on_drained callback failed [{self.extension}]")
             return SILENCE
 
     def flush_buffer(self) -> None:

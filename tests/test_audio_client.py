@@ -20,6 +20,7 @@ def _bare_client() -> ra.RepeaterAudioClient:
     from collections import deque
     c._buffer = deque(maxlen=100)
     c._pause_pending = False
+    c._voice_active = False
     c._on_drained = None
     c.extension = "50420"
     c.username = "test-vhf"
@@ -46,6 +47,24 @@ def test_drain_then_pause_fires_on_drained_once():
     assert out[:2] == [b"a", b"b"]          # tail plays out first
     assert out[2] == ra.SILENCE and events == ["pause"]
     assert c.read_frame() == ra.SILENCE and events == ["pause"]  # exactly once
+
+
+def test_pending_pause_is_skipped_when_a_new_transmission_is_active():
+    # Race: a rapid back-to-back transmission (e.g. the ARRL audio news) starts
+    # before the previous one's deferred pause drains. When the buffer empties,
+    # voice is active again, so the stale pause must NOT fire — otherwise
+    # playback pauses out from under the live transmission and it never resumes
+    # (records but is never relayed).
+    events = []
+    c = _bare_client()
+    c._on_drained = lambda: events.append("pause")
+    c._buffer.extend([b"a", b"b"])
+    c._pause_pending = True
+    c._voice_active = True                # a new transmission is already live
+    out = [c.read_frame() for _ in range(4)]
+    assert out[:2] == [b"a", b"b"]        # previous tail still plays out
+    assert events == []                   # …but the stale pause is skipped
+    assert c._pause_pending is False      # and the flag is cleared, not left armed
 
 
 def test_ingest_drops_frames_while_pause_pending():
