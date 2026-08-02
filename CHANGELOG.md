@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The startup log now lists every configured Discord channel and where it's
+  defined** — the global default first, then each repeater tagged `default`
+  (inherited) or `per-repeater` (its own `discord:` override), for both the
+  stream-voice and activity channels. Previously it printed only the global
+  `Activity channel:`, which read `none` for a club that configures channels
+  per repeater — hiding the fact that they were set at all.
+
 ### Fixed
 - **TX (Discord → repeater) audio never decoded when the `davey` library was
   present.** If Discord's optional DAVE end-to-end voice library was installed,

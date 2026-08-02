@@ -2004,6 +2004,38 @@ async def _update_presence(rpt) -> None:
         log.debug("Presence update failed", exc_info=True)
 
 
+def _channel_summary_lines() -> list[str]:
+    """
+    Startup summary of every configured Discord channel and where it's defined:
+    the global default first, then each repeater's effective value tagged
+    'default' (inherited) or 'per-repeater' (its own `discord:` override). A
+    club that only sets per-repeater channels (leaving the global blank) can see
+    at a glance that the channels really are configured — the global line just
+    reads 'none'/'disabled', not the whole story.
+    """
+    def fmt(cid: int, empty: str) -> str:
+        return str(cid) if cid else empty
+
+    lines = ["Channels (definer in parens):"]
+
+    default_voice = cfg.bot.auto_join_channel_id
+    lines.append(f"  Stream voice — default (bot.auto_join_channel_id): {fmt(default_voice, 'disabled')}")
+    for r in cfg.repeaters:
+        cid = r.discord.channel_id if r.discord else 0
+        src = "default" if cid == default_voice else "per-repeater"
+        lines.append(f"    {r.id}: {fmt(cid, 'disabled')} ({src})")
+
+    default_act = cfg.activity.channel_id
+    lines.append(f"  Activity — default (activity.channel_id): {fmt(default_act, 'none')}")
+    for r in cfg.repeaters:
+        own = r.discord.activity_channel_id if r.discord else 0
+        if own:
+            lines.append(f"    {r.id}: {own} (per-repeater)")
+        else:
+            lines.append(f"    {r.id}: {fmt(default_act, 'none')} (default)")
+    return lines
+
+
 @bot.event
 async def on_ready():
     global _loop, _panel_view
@@ -2054,8 +2086,9 @@ async def on_ready():
     log.info(f"Bot ready: {bot.user} (ID: {bot.user.id})  ·  {len(bot.guilds)} guild(s)")
     log.info(f"Repeaters: {[r.id for r in cfg.repeaters]}")
     log.info(f"AMI: {'enabled' if cfg.asterisk.enabled else 'disabled'}  ·  "
-             f"QRZ: {'configured' if _qrz else 'not configured'}  ·  "
-             f"Activity channel: {cfg.activity.channel_id or 'none'}")
+             f"QRZ: {'configured' if _qrz else 'not configured'}")
+    for _line in _channel_summary_lines():
+        log.info(_line)
 
     await _update_presence(cfg.repeater_by_id(cfg.default_preset))
 
