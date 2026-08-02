@@ -1113,13 +1113,6 @@ def _get_voice_recv_client_cls():
     try:
         from discord.ext.voice_recv import VoiceRecvClient
         _harden_voice_recv_decoder()
-        # Do NOT try to opt out of Discord's DAVE end-to-end encryption here.
-        # Advertising max_dave_protocol_version=0 (to dodge E2EE so voice_recv
-        # could decode inbound audio) makes Discord's v8 voice gateway reject
-        # the handshake with close code 4017 — the bot can't join voice at all.
-        # DAVE is effectively mandatory, so inbound TX audio stays E2EE-wrapped
-        # and undecodable by voice_recv; the decoder hardening above keeps that
-        # from killing the receive thread. See the revert of PR #63.
         return VoiceRecvClient
     except ImportError:
         if not _tx_import_warned:
