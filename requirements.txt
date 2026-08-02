@@ -37,8 +37,11 @@ rfcvoip==2.10.2
 # gracefully (TX unavailable, everything else works normally) if this isn't
 # installed. Labeled "Experimental" upstream with a small maintainer base —
 # same category of risk as rfcvoip above, not a mature/heavily-used library.
-# PINNED: the TX decoder hardening wraps PacketDecoder.pop_data and the
-# CryptoError log filter matches this version's exact message text — both
-# are internals an upgrade could change. Bump deliberately, re-test a TX
-# session, and check the hardening log line still appears at startup.
+# PINNED: TX monkeypatches this version's internals — the decoder hardening
+# wraps PacketDecoder.pop_data, the DAVE decrypt wraps PacketDecoder._process_packet
+# (reading packet.decrypted_data), and the CryptoError log filter matches this
+# version's exact message text. All are internals an upgrade could change. Bump
+# deliberately, re-test a live TX session (audio must decode both ways), and
+# check the "decoder hardened" + "DAVE decryption enabled" log lines still
+# appear at startup.
 discord-ext-voice-recv==0.5.2a179
