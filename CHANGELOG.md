@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per repeater — hiding the fact that they were set at all.
 
 ### Fixed
+- **TX (Discord → repeater) audio now decodes — inbound DAVE (E2EE) frames are
+  decrypted before Opus decode.** Discord made DAVE end-to-end voice encryption
+  mandatory on 2026-03-01, and a call does not downgrade to transport-only just
+  because a non-DAVE receiver is present. `discord-ext-voice-recv` strips only
+  the transport layer, so it fed still-encrypted (MLS) bytes to the Opus decoder
+  and every inbound frame failed with `corrupted stream` — the repeater keyed up
+  but carried no audio (upstream voice_recv issue #53). Opting out isn't possible
+  either: advertising no DAVE support gets the voice handshake rejected with
+  close code 4017. The bot now reuses the `DaveSession` discord.py already
+  maintains for *sending* to *decrypt* each inbound frame per sender, right
+  before decode — a monkeypatch port of voice_recv
+  [PR #58](https://github.com/imayhaveborkedit/discord-ext-voice-recv/pull/58),
+  guarded to a no-op when `davey` isn't installed or the call isn't E2EE.
+  (`davey` is pulled in automatically by discord.py's `[voice]` extra.)
 - **A transmission that started right as the previous one ended could record
   but never relay into Discord.** With rapid back-to-back segments (e.g. the
   weekly ARRL audio news), a new transmission could begin while the previous

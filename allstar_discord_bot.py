@@ -1044,6 +1044,7 @@ async def _post_tx_event(rpt_id: str, callsign: str, kind: str) -> None:
 
 _tx_import_warned = False
 _vr_decoder_hardened = False
+_vr_dave_decrypt_enabled = False
 _vr_drop_log_ts: dict[int, float] = {}   # ssrc → last time we logged a drop
 
 
@@ -1102,6 +1103,106 @@ def _harden_voice_recv_decoder() -> None:
     log.info("TX: voice_recv decoder hardened (per-packet error isolation).")
 
 
+def _dave_decrypt(decoder: Any, packet: Any, davey_mod: Any) -> None:
+    """
+    Decrypt one inbound DAVE (E2EE) voice frame in place, reusing the
+    ``DaveSession`` that discord.py (>=2.7, with davey) already maintains to
+    *encrypt* the bot's outbound audio. Ported from discord-ext-voice-recv
+    PR #58; see _enable_dave_receive_decrypt for the why.
+
+    Guarded no-op unless there is a ready DAVE session on an E2EE call and the
+    SSRC is already mapped to a sender (needed to pick the right ratchet).
+    Non-E2EE passthrough frames (silence/keepalives) make decrypt raise and are
+    left unchanged — they decode fine as-is.
+    """
+    data = getattr(packet, "decrypted_data", None)
+    if not data:
+        return
+    state   = getattr(decoder.sink.voice_client, "_connection", None)
+    session = getattr(state, "dave_session", None)
+    if (
+        session is None
+        or not getattr(session, "ready", False)
+        or getattr(state, "dave_protocol_version", 0) == 0
+    ):
+        return
+    user_id = decoder._cached_id
+    if user_id is None:
+        # SSRC not mapped to a sender yet — can't choose a ratchet; leave it.
+        return
+    try:
+        packet.decrypted_data = session.decrypt(
+            int(user_id), davey_mod.MediaType.audio, bytes(data)
+        )
+    except Exception as exc:
+        # Expected for non-E2EE passthrough frames; the decoder hardening drops
+        # anything genuinely undecodable instead of crashing the receive thread.
+        log.debug(f"TX: DAVE decrypt passthrough/miss for ssrc={decoder.ssrc}: {exc}")
+
+
+def _enable_dave_receive_decrypt() -> None:
+    """
+    Teach discord-ext-voice-recv to decrypt inbound DAVE (E2EE) frames so TX
+    (Discord → repeater) audio actually decodes.
+
+    Discord made DAVE end-to-end voice encryption mandatory on 2026-03-01, and
+    a call does NOT downgrade just because a non-DAVE receiver (this bot's
+    voice_recv) is present. After transport decryption every real voice frame
+    is still MLS ciphertext, so the Opus decoder raises "corrupted stream" on
+    every packet (upstream issue #53) — the repeater keys up but carries no
+    audio. Opting out isn't possible either: advertising no DAVE support gets
+    the voice handshake rejected with close code 4017. The only fix is to
+    actually decrypt.
+
+    discord.py already keeps a DaveSession (it must, to send). This wraps
+    PacketDecoder._process_packet to run that session's decryptor over each
+    inbound frame right before decode — a monkeypatch port of voice_recv
+    PR #58, which its author verified in production on this exact stack
+    (discord.py 2.7.1 + davey 0.1.6). Installed as a patch so we stay on the
+    pinned release instead of a fork/unmerged branch, same posture as
+    _harden_voice_recv_decoder.
+
+    No-op when davey or voice_recv isn't installed; TX inbound then stays
+    silent (everything else works), exactly as before.
+    """
+    global _vr_dave_decrypt_enabled
+    if _vr_dave_decrypt_enabled:
+        return
+    try:
+        from discord.ext.voice_recv.opus import PacketDecoder
+    except ImportError:
+        return   # voice_recv not installed; nothing to patch
+    try:
+        import davey
+    except ImportError:
+        log.info(
+            "TX: davey (DAVE E2EE library) isn't installed, so inbound Discord "
+            "audio can't be decrypted — TX will stay silent. davey ships with "
+            "discord.py's [voice] extra; reinstall requirements.txt to enable TX."
+        )
+        return
+
+    _orig_process_packet = PacketDecoder._process_packet
+
+    def _process_packet_with_dave(self: Any, packet: Any) -> Any:
+        # DAVE needs the ssrc→sender mapping to pick the right ratchet; the
+        # original method resolves it only after decode, so do it here first.
+        if self._cached_id is None:
+            try:
+                self._cached_id = self.sink.voice_client._get_id_from_ssrc(self.ssrc)
+            except Exception:
+                pass
+        _dave_decrypt(self, packet, davey)
+        return _orig_process_packet(self, packet)
+
+    PacketDecoder._process_packet = _process_packet_with_dave  # type: ignore[method-assign]  # deliberate monkeypatch — see above
+    _vr_dave_decrypt_enabled = True
+    log.info(
+        "TX: inbound DAVE (E2EE) decryption enabled — decrypting Discord audio "
+        "via discord.py's DaveSession."
+    )
+
+
 def _get_voice_recv_client_cls():
     """
     Lazily import discord-ext-voice-recv's VoiceRecvClient for TX. Returns
@@ -1113,6 +1214,7 @@ def _get_voice_recv_client_cls():
     try:
         from discord.ext.voice_recv import VoiceRecvClient
         _harden_voice_recv_decoder()
+        _enable_dave_receive_decrypt()
         return VoiceRecvClient
     except ImportError:
         if not _tx_import_warned:
