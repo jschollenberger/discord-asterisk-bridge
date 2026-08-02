@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **TX (Discord → repeater) audio never decoded when the `davey` library was
+  present.** If Discord's optional DAVE end-to-end voice library was installed,
+  discord.py advertised DAVE and Discord E2EE-encrypted every inbound voice
+  packet. discord-ext-voice-recv has no DAVE support, so it decrypted only the
+  transport layer and fed still-encrypted bytes to the Opus decoder — which
+  failed with `corrupted stream` on *every* packet. The repeater keyed up (DTMF
+  PTT is a separate path) but carried no audio. When TX is enabled the bot now
+  opts out of DAVE (advertises `max_dave_protocol_version = 0`), so the channel
+  downgrades to transport-only encryption that voice_recv can decode. This was
+  never platform-specific — it behaves identically on Linux. Trade-off: the
+  voice channel isn't end-to-end encrypted while the bot is connected (inherent
+  for an RF bridge).
 - **A transmission that started right as the previous one ended could record
   but never relay into Discord.** With rapid back-to-back segments (e.g. the
   weekly ARRL audio news), a new transmission could begin while the previous

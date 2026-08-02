@@ -1044,7 +1044,52 @@ async def _post_tx_event(rpt_id: str, callsign: str, kind: str) -> None:
 
 _tx_import_warned = False
 _vr_decoder_hardened = False
+_dave_disabled = False
 _vr_drop_log_ts: dict[int, float] = {}   # ssrc → last time we logged a drop
+
+
+def _disable_dave_e2ee() -> None:
+    """
+    Opt out of Discord's DAVE end-to-end voice encryption so voice-receive (TX)
+    can actually decode inbound audio.
+
+    When the optional ``davey`` library happens to be installed, discord.py
+    advertises DAVE support (``max_dave_protocol_version > 0``) in the voice
+    IDENTIFY, and Discord then E2EE-encrypts every voice packet on top of the
+    transport encryption. discord-ext-voice-recv has no DAVE support, so it
+    decrypts only the transport layer and hands still-E2EE-encrypted bytes to
+    the Opus decoder — which fails with ``OpusError: corrupted stream`` on
+    EVERY packet. The visible symptom is exactly what a TX test shows: the
+    repeater keys up (DTMF PTT is a separate control path) but carries no
+    audio, because not one voice frame ever decodes.
+
+    Forcing ``has_dave = False`` makes discord.py advertise
+    ``max_dave_protocol_version = 0``; DAVE then gracefully downgrades the
+    channel to transport-only encryption, which voice_recv *can* decode.
+
+    Trade-off: while the bot is connected, that voice channel is not
+    end-to-end encrypted — inherent for a bridge that puts the audio on RF
+    anyway. Only done when TX is enabled (see _get_voice_recv_client_cls), so a
+    send-only (RX-playback) deployment never forces a downgrade it doesn't need.
+
+    This is NOT platform-specific: davey/DAVE behave identically on Linux, so
+    running there would not have helped.
+    """
+    global _dave_disabled
+    if _dave_disabled:
+        return
+    _dave_disabled = True
+    try:
+        from discord import voice_state as _vs
+    except Exception:
+        return
+    if getattr(_vs, "has_dave", False):
+        _vs.has_dave = False   # property max_dave_protocol_version now returns 0
+        log.info(
+            "TX: opted out of DAVE end-to-end voice encryption so inbound audio "
+            "decodes — the voice channel uses transport-only encryption while "
+            "the bot is connected."
+        )
 
 
 def _harden_voice_recv_decoder() -> None:
@@ -1113,6 +1158,7 @@ def _get_voice_recv_client_cls():
     try:
         from discord.ext.voice_recv import VoiceRecvClient
         _harden_voice_recv_decoder()
+        _disable_dave_e2ee()   # DAVE-wrapped audio is undecodable by voice_recv
         return VoiceRecvClient
     except ImportError:
         if not _tx_import_warned:
