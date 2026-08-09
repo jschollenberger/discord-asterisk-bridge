@@ -2181,6 +2181,9 @@ async def on_ready():
         state_sync.start()
     if not channel_status_task.is_running():
         channel_status_task.start()
+    if not media_liveness_watch.is_running():
+        media_liveness_watch.start()
+        log.info("Media-liveness watch started.")
     if cfg.asterisk.enabled and cfg.has_activity_channels():
         if not activity_feed.is_running():
             activity_feed.start()
@@ -3440,6 +3443,65 @@ async def sip_health_watch():
                 await channel.send(f"✅ **SIP audio for {rpt_name}** recovered in **{gname}**.")
             except Exception as exc:
                 log.warning(f"Activity channel post failed (SIP health recovery): {exc}")
+
+
+# ── Media-liveness watchdog ─────────────────────────────────────────────────
+# SIP signaling (OPTIONS/register) and the asyncio loop can stay perfectly
+# healthy while the RX audio path wedges: rfcvoip's read_audio(blocking=True)
+# spins forever if inbound RTP stops. On 2026-08-08 both repeaters froze mid-net
+# and relayed nothing for ~7h while SIP heartbeats kept logging "OK", because
+# nothing watched whether audio was actually *flowing*. On a CONNECTED call
+# AllStar streams continuous RTP (~50 fps even in silence), so zero frames for
+# this long is unambiguous — the pipeline is stuck and must be reconnected.
+_MEDIA_STALL_SECONDS          = 45.0
+_MEDIA_FORCE_COOLDOWN_SECONDS = 30.0
+
+
+def _media_stall_action(
+    since_rx: "float | None",
+    since_force: "float | None",
+    stall_s: float = _MEDIA_STALL_SECONDS,
+    cooldown_s: float = _MEDIA_FORCE_COOLDOWN_SECONDS,
+) -> str:
+    """
+    Decide what media_liveness_watch should do for one monitor. Pure, so it's
+    unit-tested without threads or a live SIP call:
+
+    - ``"ok"``    — receiving audio, or not CONNECTED (``since_rx`` is None).
+    - ``"force"`` — silent past the stall threshold and no reconnect was forced
+      within the cooldown: break the wedge and reconnect.
+    - ``"wait"``  — silent, but a reconnect was forced recently; give it time to
+      come back before forcing again.
+    """
+    if since_rx is None or since_rx <= stall_s:
+        return "ok"
+    if since_force is not None and since_force < cooldown_s:
+        return "wait"
+    return "force"
+
+
+@tasks.loop(seconds=15)
+async def media_liveness_watch():
+    """Force a reconnect on any monitor whose CONNECTED call has stopped
+    delivering RX audio (see _media_stall_action and
+    RepeaterAudioClient.force_reconnect). Runs for every deployment — it guards
+    the core repeater→Discord relay, independent of activity channels."""
+    for _rpt_id, client in list(_monitor_clients.items()):
+        since_rx = client.seconds_since_rx()
+        if _media_stall_action(since_rx, client.seconds_since_force()) != "force":
+            continue
+        # A force that didn't take (still silent past the cooldown) escalates to
+        # ERROR — the surgical unblock isn't working, so it likely needs a human.
+        escalated = client.seconds_since_force() is not None
+        client.force_reconnect(
+            f"no RX audio for {since_rx or 0.0:.0f}s on a connected call",
+            escalated=escalated,
+        )
+
+
+@media_liveness_watch.before_loop
+async def _media_liveness_before_loop():
+    await bot.wait_until_ready()
 
 
 @tasks.loop(seconds=1)

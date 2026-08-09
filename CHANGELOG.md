@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per repeater — hiding the fact that they were set at all.
 
 ### Fixed
+- **A wedged RX audio pipeline is now detected and auto-recovered instead of
+  going silently dead.** On 2026-08-08 both repeaters stopped relaying mid-net
+  and posted no recordings for ~7 hours, yet the process stayed up and SIP
+  signaling kept logging `heartbeat OK` every 10 minutes — nothing watched
+  whether audio was actually *flowing*. Root cause: rfcvoip's
+  `read_audio(blocking=True)` spins forever if inbound RTP stops, so the RX loop
+  wedged with no error logged, and `.stop()` couldn't even interrupt it
+  (teardown hung at shutdown). A new media-liveness watchdog tracks the time of
+  each monitor's last RX frame and, when a `CONNECTED` call goes ~45s with zero
+  frames (AllStar streams continuous RTP even in silence, so that's
+  unambiguous), forces the monitor to reconnect — closing the phone/call
+  unblocks the stuck read and the background thread re-establishes the call on
+  its own. Recovery in ~1 minute instead of until someone notices.
 - **TX (Discord → repeater) audio now decodes — inbound DAVE (E2EE) frames are
   decrypted before Opus decode.** Discord made DAVE end-to-end voice encryption
   mandatory on 2026-03-01, and a call does not downgrade to transport-only just
