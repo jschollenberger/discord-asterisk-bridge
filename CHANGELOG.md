@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-08-16
+
+Reliability and TX fixes: inbound Discord → repeater audio now decodes through
+Discord's now-mandatory DAVE end-to-end encryption, a media-liveness watchdog
+auto-recovers a silently wedged audio pipeline, and a back-to-back-transmission
+race that could drop a relay is fixed — plus the startup banner and `/help` now
+show the exact running build (`git describe`) so "which commit am I on?" is
+answerable at a glance from source.
+
 ### Changed
 - **The startup banner and the `/help` About line now show the running build**,
   not just the release version — e.g. `v1.3.0 (build v1.3.0-9-gd385cf2)` when
@@ -459,7 +468,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.5...v1.2.0
 [1.1.5]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.4...v1.1.5
