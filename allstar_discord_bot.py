@@ -58,7 +58,7 @@ from rich.table import Table
 from rich.text import Text
 
 from ami import AMIClient, AMICommandError, monitor as node_monitor
-from config import cfg, REPEATER_COMMAND_PLACEHOLDER, BOT_VERSION
+from config import cfg, REPEATER_COMMAND_PLACEHOLDER, version_string
 from qrz import QRZClient, QRZError
 from solar import fetch_solar
 
@@ -3158,7 +3158,7 @@ async def solar_cmd(ctx: commands.Context):
 
 def _about_line() -> str:
     """One-line project accreditation shown in the /help embed."""
-    return f"{PROJECT_NAME} **v{BOT_VERSION}** · by {AUTHOR} · {LICENSE}"
+    return f"{PROJECT_NAME} **v{version_string()}** · by {AUTHOR} · {LICENSE}"
 
 
 def _help_links_view() -> discord.ui.View:
@@ -3671,7 +3671,7 @@ def main() -> None:
         for r in cfg.repeaters
     )
     console.print(Panel.fit(
-        f"[bold magenta]{BOT_NAME}[/bold magenta]  v{BOT_VERSION}\n"
+        f"[bold magenta]{BOT_NAME}[/bold magenta]  v{version_string()}\n"
         f"Club      : {cfg.club.name} ({cfg.club.callsign})\n"
         f"Repeaters : {repeater_summary}\n"
         f"Log file  : {cfg.bot.log_file}\n"
@@ -3683,7 +3683,7 @@ def main() -> None:
 
     # Write version banner to the log file so each run is clearly identified
     log.info(f"{'─' * 60}")
-    log.info(f"{BOT_NAME}  v{BOT_VERSION}  —  starting up")
+    log.info(f"{BOT_NAME}  v{version_string()}  —  starting up")
     log.info(f"Club: {cfg.club.name} ({cfg.club.callsign})  ·  Repeaters: {[r.id for r in cfg.repeaters]}")
     log.info(f"{'─' * 60}")
 

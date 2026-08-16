@@ -11,7 +11,7 @@ def test_about_line_names_project_version_author_license(bot_module):
     m = bot_module
     line = m._about_line()
     assert m.PROJECT_NAME in line
-    assert m.BOT_VERSION in line
+    assert m.version_string() in line   # release semver, plus git build id off-release
     assert m.AUTHOR in line
     assert m.LICENSE in line
 

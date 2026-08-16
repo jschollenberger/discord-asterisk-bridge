@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,60 @@ import yaml
 # Single source of truth for the bot version — used by the startup banner,
 # log lines, and the QRZ API user-agent, so a release bump is one edit.
 BOT_VERSION = "1.3.0"
+
+
+# ── Running build identity ──────────────────────────────────────────────────
+# BOT_VERSION is the release semver (it drives the CHANGELOG, GitHub releases,
+# and the QRZ user-agent). But running from a source checkout between releases,
+# the banner would still say "1.3.0" even though `main` is several commits past
+# the tag — the recurring "which build am I actually on?" confusion. version_string()
+# additionally surfaces `git describe` (e.g. "1.3.0 (build v1.3.0-9-gd385cf2)",
+# with "-dirty" appended for uncommitted edits). On the exact release commit —
+# or when git / the .git dir isn't available (a source zip) — it collapses back
+# to just BOT_VERSION, so tagged releases are never polluted.
+_build_id_computed = False
+_build_id_value: Optional[str] = None
+
+
+def _compute_build_id() -> Optional[str]:
+    repo = Path(__file__).resolve().parent
+    if not (repo / ".git").exists():
+        return None
+    try:
+        proc = subprocess.run(
+            ["git", "describe", "--tags", "--always", "--dirty"],
+            cwd=repo, capture_output=True, text=True, timeout=2,
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _build_id() -> Optional[str]:
+    """`git describe` for the running checkout, computed once and cached."""
+    global _build_id_computed, _build_id_value
+    if not _build_id_computed:
+        _build_id_computed = True
+        _build_id_value = _compute_build_id()
+    return _build_id_value
+
+
+def _format_version(version: str, build_id: Optional[str]) -> str:
+    # Only append the build id when it adds information — i.e. we're off the
+    # release tag or the tree is dirty. On the exact tag `git describe` returns
+    # "vX.Y.Z" (or bare "X.Y.Z"), which would just duplicate `version`.
+    if build_id and build_id not in (version, f"v{version}"):
+        return f"{version} (build {build_id})"
+    return version
+
+
+def version_string() -> str:
+    """BOT_VERSION for a clean release, else 'X.Y.Z (build <git-describe>)' when
+    running from source ahead of the last tag or with uncommitted changes."""
+    return _format_version(BOT_VERSION, _build_id())
+
 
 CONFIG_PATH = Path("config.yaml")
 
