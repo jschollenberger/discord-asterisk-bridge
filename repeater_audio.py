@@ -385,6 +385,13 @@ class RepeaterAudioClient:
         self._state_since = time.time()
         self._running     = False
         self._thread: Optional[threading.Thread] = None
+        self._phone: Any = None            # live VoIPPhone; force_reconnect() closes it to unblock a wedged read
+        # Media liveness: monotonic time of the last RX frame. On a CONNECTED
+        # call AllStar streams continuous RTP (~50 fps even in silence), so a
+        # long gap means read_audio() has wedged — see force_reconnect() and the
+        # bot's media_liveness_watch. 0.0 until the first connect.
+        self._last_rx_monotonic: float = 0.0
+        self._last_force_monotonic: float = 0.0
 
         self._buffer: deque[bytes] = deque(maxlen=BUFFER_MAXFRAMES)
         self._resample_state: Any = None   # opaque audioop.ratecv cookie, carried across frames — RX direction
@@ -465,6 +472,49 @@ class RepeaterAudioClient:
             return True
         t.join(timeout)
         return not t.is_alive()
+
+    def seconds_since_rx(self) -> Optional[float]:
+        """
+        Monotonic seconds since the last RX audio frame, or None when the call
+        isn't CONNECTED (so a not-yet-connected or reconnecting monitor is never
+        mistaken for a wedged one). Read by the bot's media_liveness_watch.
+        """
+        if self._state != ConnectionState.CONNECTED or not self._last_rx_monotonic:
+            return None
+        return time.monotonic() - self._last_rx_monotonic
+
+    def seconds_since_force(self) -> Optional[float]:
+        """Monotonic seconds since the last force_reconnect(), or None if never."""
+        if not self._last_force_monotonic:
+            return None
+        return time.monotonic() - self._last_force_monotonic
+
+    def force_reconnect(self, reason: str, *, escalated: bool = False) -> None:
+        """
+        Break a wedged RX read and let _run() reconnect. Safe to call from
+        another thread (the bot's media_liveness_watch).
+
+        read_audio(blocking=True) spins forever when inbound RTP stops — rfcvoip
+        RTP.read loops until the jitter buffer fills or the client's NSD flag
+        clears — so flipping _running alone can't free the worker thread.
+        Closing the phone/call from here clears NSD and closes the RTP socket,
+        which unblocks the read; _connect_and_stream() then falls through its
+        cleanup and _run() reconnects because _running stays True.
+        """
+        self._last_force_monotonic = time.monotonic()
+        (log.error if escalated else log.warning)(
+            f"SIP [{self.extension}]: forcing audio reconnect — {reason}"
+        )
+        for label, fn in (
+            ("call.hangup", getattr(self._call, "hangup", None)),
+            ("phone.stop",  getattr(self._phone, "stop", None)),
+        ):
+            if fn is None:
+                continue
+            try:
+                fn()
+            except Exception:
+                log.debug(f"SIP [{self.extension}]: force_reconnect {label}() raised", exc_info=True)
 
     def read_frame(self) -> bytes:
         """
@@ -829,6 +879,8 @@ class RepeaterAudioClient:
 
             self._set_state(ConnectionState.CONNECTED)
             self._call = call   # send_frame() checks this; set only once answered
+            self._phone = phone            # force_reconnect() closes this to break a wedged read
+            self._last_rx_monotonic = time.monotonic()   # arm liveness before the first frame
             log.info(f"SIP call answered — streaming node {self.extension}")
 
             # ── RX loop ──────────────────────────────────────────────────────
@@ -844,6 +896,7 @@ class RepeaterAudioClient:
                     if frames_received == 0:
                         log.debug(f"SIP [{self.extension}]: first RX audio frame received")
                     frames_received += 1
+                    self._last_rx_monotonic = time.monotonic()   # liveness: a frame arrived
                     self._ingest_rx_frame(pcm_8k_mono)
             return True   # we connected and streamed — _run resets its back-off
         finally:
@@ -855,6 +908,7 @@ class RepeaterAudioClient:
                     f"(final call.state={getattr(call, 'state', None)!r}, self._running={self._running})"
                 )
             self._call = None   # stop send_frame() from sending to a dead call
+            self._phone = None
             self._set_state(ConnectionState.IDLE)
             if call is not None:
                 # Only hang up a still-answered call. A remote BYE (Asterisk
