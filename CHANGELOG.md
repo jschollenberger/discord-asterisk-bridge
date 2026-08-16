@@ -15,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The startup banner and the `/help` About line now show the running build**,
+  not just the release version — e.g. `v1.3.0 (build v1.3.0-9-gd385cf2)` when
+  running from a source checkout ahead of the last tag, with `-dirty` appended
+  for uncommitted edits on the box. On the exact release commit (or when git
+  isn't available) it collapses back to a clean `v1.3.0`, so tagged releases are
+  never polluted. `BOT_VERSION` stays the release semver (CHANGELOG, GitHub
+  releases, QRZ user-agent); the build id comes from `git describe`. Answers
+  "which commit is actually live?" at a glance when running from `main` between
+  releases.
 - **The startup log now lists every configured Discord channel and where it's
   defined** — the global default first, then each repeater tagged `default`
   (inherited) or `per-repeater` (its own `discord:` override), for both the
