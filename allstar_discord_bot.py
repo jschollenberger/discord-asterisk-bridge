@@ -441,6 +441,32 @@ def _setup_logging() -> logging.Logger:
 
     logging.getLogger("asyncio").addFilter(_ProactorConnectionLostFilter())
 
+    class _VoicePollerTaskExcFilter(logging.Filter):
+        """Quiet the alarming 'Task exception was never retrieved' traceback that
+        asyncio dumps when discord.py's voice-reconnect task ('Voice websocket
+        poller') ends on a network error — most often a transient DNS failure
+        resolving *.discord.media (getaddrinfo / ClientConnectorDNSError). It is
+        not fatal: the bot's watchdog re-establishes voice on its own once the
+        network recovers (see _should_rejoin). Demote that specific case to a
+        one-line DEBUG; every other asyncio 'Task exception' passes through
+        untouched (matched on the discord.py task name, so unrelated tasks are
+        never swallowed)."""
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            if ("Task exception was never retrieved" in msg
+                    and "Voice websocket poller" in msg):
+                record.levelno   = logging.DEBUG
+                record.levelname = "DEBUG"
+                record.exc_info  = None
+                record.exc_text  = None
+                record.msg = ("Discord voice-reconnect task ended on a network error "
+                              "(e.g. DNS) — not fatal, the watchdog re-establishes voice")
+                record.args = ()
+            return True
+
+    logging.getLogger("asyncio").addFilter(_VoicePollerTaskExcFilter())
+
     for noisy in ("discord.gateway", "discord.client", "discord.http", "discord.ext.voice_recv"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
@@ -2316,6 +2342,19 @@ async def on_voice_state_update(
 async def _do_join(guild: discord.Guild, channel) -> str:
     gs = get_state(guild.id)
     vc = _vc(guild.voice_client)
+
+    # A stale client left by a voice drop that never fully tore down still shows
+    # up as guild.voice_client, but reusing it raises "Not connected to voice"
+    # the moment we listen()/play() on it — exactly what /uhf and the panel
+    # presets hit during the 2026-08-18 outage. Force it away so the connect
+    # path below rebuilds a live one instead of erroring.
+    if vc is not None and not vc.is_connected():
+        try:
+            await vc.disconnect(force=True)
+        except Exception:
+            log.debug(f"Discarding a stale voice client raised [{guild.name}]", exc_info=True)
+        await asyncio.sleep(0.5)   # let the old socket finish tearing down before reconnecting
+        vc = None
 
     # Short-circuit before doing anything if already streaming in this channel
     if vc and (vc.is_playing() or vc.is_paused()) and vc.channel == channel:

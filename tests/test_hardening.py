@@ -134,3 +134,31 @@ def test_proactor_connection_lost_filter_demotes_winerror(bot_module, caplog):
 
     passthru = [r for r in caplog.records if "some other asyncio failure" in r.getMessage()]
     assert len(passthru) == 1 and passthru[0].levelno == logging.ERROR
+
+
+def test_voice_poller_task_exception_is_quieted(bot_module, caplog):
+    """The 'Task exception was never retrieved' dump asyncio prints when
+    discord.py's voice-reconnect task dies on a network/DNS error is demoted to
+    a one-line DEBUG; an unrelated task exception is left alone."""
+    lg = logging.getLogger("asyncio")
+    flt = [f for f in lg.filters if type(f).__name__ == "_VoicePollerTaskExcFilter"]
+    assert flt, "voice-poller task-exception filter must be attached to asyncio"
+
+    poller_msg = (
+        "Task exception was never retrieved\n"
+        "future: <Task finished name='Voice websocket poller' "
+        "coro=<VoiceConnectionState._poll_voice_ws() done> "
+        "exception=ClientConnectorDNSError(...)>"
+    )
+    with caplog.at_level(logging.DEBUG, logger="asyncio"):
+        lg.error(poller_msg, exc_info=(OSError, OSError("getaddrinfo failed"), None))
+        # An unrelated task exception must not be swallowed.
+        lg.error("Task exception was never retrieved\nfuture: <Task name='something-else'>")
+
+    demoted = [r for r in caplog.records if "voice-reconnect task ended" in r.getMessage()]
+    assert len(demoted) == 1
+    assert demoted[0].levelno == logging.DEBUG
+    assert demoted[0].exc_info is None                       # traceback stripped
+
+    passthru = [r for r in caplog.records if "something-else" in r.getMessage()]
+    assert len(passthru) == 1 and passthru[0].levelno == logging.ERROR
