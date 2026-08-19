@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A quiet talker's single over is no longer chopped into a pile of
+  one-sentence recordings.** The RX voice-activity gate was a single energy
+  threshold, so a quiet operator whose speech sat just above it dipped *below*
+  it on every unvoiced consonant and inter-word gap — each dip that outlasted
+  the hangover ended the over and started a new recording. The gate is now a
+  Schmitt trigger: it still takes the full `vad_rms_threshold` to *start* an
+  over (so receiver hiss and courtesy tones don't false-trigger), but only half
+  that to *hold* one, so an over stays whole through those dips. Genuine
+  end-of-over (true silence, below the sustain floor) still closes out through
+  the hangover as before. Sites that see fragmentation across real
+  *between-sentence* pauses can additionally raise `vad_hangover_seconds`
+  (now documented as tunable to 2.5–3.0 for slow-paced nets).
+
 ## [1.3.2] — 2026-08-18
 
 Resilience hardening after two live incidents. The bot now auto-recovers from an
