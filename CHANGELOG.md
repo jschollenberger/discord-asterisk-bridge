@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The bot now auto-recovers from an unexpected voice-channel drop instead of
+  going silently dark.** A routine Discord voice reconnect (close code 1006) that
+  failed to complete — e.g. a transient DNS blip resolving `*.discord.media`
+  (`getaddrinfo failed`) — was misclassified as a clean disconnect: the handler
+  cleared the rejoin intent (`desired_channel_id`), so the watchdog never rejoined.
+  Observed 2026-08-18: one failed reconnect left the bot out of the voice channel
+  for ~10 hours (SIP and recording kept working) until someone pressed the panel
+  Reconnect button. Now only a deliberate `/leave` or panel-Stop clears the intent;
+  any other drop keeps it set, so the 30-second watchdog keeps retrying the rejoin
+  and the bot comes back on its own once the network recovers. (Trade-off: an admin
+  who manually disconnects the bot from voice will now see it rejoin — the intended
+  way to stop an always-on stream is the panel Stop button or `/leave`.)
+
 ## [1.3.1] — 2026-08-16
 
 Reliability and TX fixes: inbound Discord → repeater audio now decodes through

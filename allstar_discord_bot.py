@@ -2287,21 +2287,27 @@ async def on_voice_state_update(
         return
 
     # True disconnect. A deliberate teardown (/leave or the panel Stop button)
-    # already cleared desired_channel_id before disconnecting, so if it's None
-    # here this was intentional — log it at INFO. If it still holds a channel,
-    # the drop was unexpected (admin kick, network loss with no recovery) and
-    # is worth a WARNING (the watchdog cares about exactly this case).
+    # already cleared desired_channel_id BEFORE disconnecting, so if it's None
+    # here the stop was intentional — stay out. If it still holds a channel, the
+    # drop was unexpected — a 1006 rotation whose reconnect stalled, a transient
+    # DNS/network blip, or an admin kick — so KEEP desired_channel_id set and let
+    # the watchdog keep retrying the rejoin every 30s until the network recovers.
+    # Clearing it here used to strand the bot silently out of voice until someone
+    # hit Reconnect (observed 2026-08-18: one `getaddrinfo failed` during a
+    # routine reconnect took it off the air for ~10 hours).
     gs = get_state(guild.id)
     was_intentional = gs.desired_channel_id is None
     gs.streaming  = False
     gs.started_at = None
     gs.channel    = "—"
-    gs.desired_channel_id = None   # Discord confirmed a clean disconnect — don't rejoin
     _clear_audio_client(guild.id)
     if was_intentional:
         log.info(f"Bot disconnected from '{channel_name}' (deliberate stop) [{guild.name}]")
     else:
-        log.warning(f"Bot truly disconnected from '{channel_name}' [{guild.name}]")
+        log.warning(
+            f"Bot dropped from '{channel_name}' [{guild.name}] and didn't reconnect in "
+            f"time — the watchdog will keep trying to rejoin."
+        )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Core Join Logic
@@ -3298,11 +3304,13 @@ def _solar_embed(data: dict) -> discord.Embed:
 def _should_rejoin(gs: GuildState, connected: bool) -> bool:
     """The watchdog should force a full rejoin when we still intend to be
     streaming somewhere (desired_channel_id set) but the voice connection is
-    down. This catches a dead/stuck voice link that never fired a clean
-    disconnect event — e.g. a 1006 server rotation whose reconnect stalled,
-    which otherwise leaves the bot silent in Discord (SIP/recording keep
-    working) until someone restarts it. A deliberate /leave, panel-stop, or
-    admin kick clears desired_channel_id, so those are not rejoined."""
+    down. This catches a dead/stuck voice link — a 1006 server rotation whose
+    reconnect stalled, or a transient DNS/network blip that discord.py couldn't
+    ride out — which otherwise leaves the bot silent in Discord (SIP/recording
+    keep working) until someone restarts it. Only a deliberate /leave or
+    panel-stop clears desired_channel_id (before disconnecting), so those stay
+    out; every other drop keeps it set and is rejoined (see
+    on_voice_state_update)."""
     return gs.desired_channel_id is not None and not connected
 
 
