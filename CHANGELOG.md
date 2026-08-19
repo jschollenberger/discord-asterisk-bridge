@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] — 2026-08-18
+
+Resilience hardening after two live incidents. The bot now auto-recovers from an
+unexpected voice-channel drop — a transient DNS blip that stranded it silently
+out of voice for ~10 hours now just triggers the watchdog's rejoin — switching
+repeaters no longer errors when the link had dropped, and unhandled command or
+button errors show a friendly message while the full traceback goes to the log
+instead of the user. Plus the dead voice-poller's shutdown traceback is quieted.
+
 ### Fixed
 - **The bot now auto-recovers from an unexpected voice-channel drop instead of
   going silently dark.** A routine Discord voice reconnect (close code 1006) that
@@ -500,7 +509,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.1.5...v1.2.0
