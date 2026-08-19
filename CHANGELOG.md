@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the bot comes back on its own once the network recovers. (Trade-off: an admin
   who manually disconnects the bot from voice will now see it rejoin — the intended
   way to stop an always-on stream is the panel Stop button or `/leave`.)
+- **Switching repeaters (`/uhf`, a panel preset, `/join`) no longer errors with
+  `Not connected to voice` when the voice link had dropped.** A stale voice client
+  left by an unrecovered drop was being reused; `_do_join` now discards a
+  disconnected client and reconnects from scratch, so the switch just works (or
+  reports a clean `❌ Connection failed` if the network is still down) instead of
+  surfacing a raw `ClientException`.
+- **Quieted the alarming `Task exception was never retrieved` traceback** that
+  asyncio printed when discord.py's voice-reconnect task ended on a transient DNS
+  error (`getaddrinfo failed` resolving `*.discord.media`). It isn't fatal — the
+  watchdog re-establishes voice — so it's demoted to a one-line DEBUG.
 
 ## [1.3.1] — 2026-08-16
 
