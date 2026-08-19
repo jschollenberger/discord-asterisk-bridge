@@ -157,19 +157,33 @@ SILENCE = bytes(DISCORD_FRAME_BYTES)
 BUFFER_MAXFRAMES = 100
 
 # ── Voice-activity detection (VAD) ────────────────────────────────────────────
-# Simple energy-threshold VAD on the 8kHz mono RX stream, used to report
-# completed transmissions (on_transmission) and drive Discord's speaking
-# indicator (on_speaking_change). The RMS threshold AND the hangover window
-# are both site-dependent — threshold on noise floor/receiver level, hangover
-# on how people actually talk (pause length between words/sentences varies a
-# lot by operator). Both are passed in per-client from config.yaml rather
-# than fixed constants — an earlier version hardcoded hangover at 300ms on
-# the assumption it wouldn't need tuning; in practice that was too short and
-# split single continuous transmissions into several multi-second fragments
-# whenever someone paused mid-sentence to breathe. VAD_MIN_TX_SECONDS is the
-# one constant left fixed — it just filters obvious noise blips, not a
-# behavior that varies by operator the way hangover does.
+# Energy-threshold VAD on the 8kHz mono RX stream, used to report completed
+# transmissions (on_transmission) and drive Discord's speaking indicator
+# (on_speaking_change). Two site-dependent levers, both passed in per-client
+# from config.yaml rather than fixed constants:
+#   * the RMS threshold — depends on receiver level / noise floor; and
+#   * the hangover window — how long a pause is tolerated before the over is
+#     declared finished (pause length between words/sentences varies a lot by
+#     operator). An earlier version hardcoded hangover at 300ms assuming it
+#     wouldn't need tuning; in practice that was too short and split single
+#     continuous transmissions into several multi-second fragments whenever
+#     someone paused mid-sentence to breathe.
+#
+# The gate is a Schmitt trigger, not one flat level: it takes the full
+# threshold to START an over (so receiver hiss and courtesy tones don't
+# false-trigger) but only VAD_SUSTAIN_RATIO of it to KEEP one alive. Without
+# that, a quiet talker whose speech sits just above the start threshold dips
+# below it on every unvoiced consonant and inter-word gap, and each dip that
+# outlasts the hangover chops one over into a pile of one-sentence fragments.
+# The lower sustain floor rides through those dips while still letting a real
+# end-of-over (true silence, well below sustain) close out through the
+# hangover as before.
+#
+# VAD_MIN_TX_SECONDS and VAD_SUSTAIN_RATIO are the constants left fixed. The
+# ratio is deliberately relative to whatever start threshold the site tuned,
+# so it travels across sites the way an absolute sustain level would not.
 VAD_MIN_TX_SECONDS  = 0.5     # ignore shorter blips as VAD noise, not real transmissions
+VAD_SUSTAIN_RATIO   = 0.5     # once keyed, hold the over until RMS drops below this × the start threshold
 
 
 _rfcvoip_debug_bridged = False
@@ -411,6 +425,10 @@ class RepeaterAudioClient:
         self._pause_pending      = False
         self._on_drained         = on_drained
         self._vad_rms_threshold  = vad_rms_threshold
+        # Schmitt-trigger sustain floor: lower bar to KEEP an over alive than to
+        # START one, so a quiet talker's inter-word dips don't fragment a single
+        # over. See VAD_SUSTAIN_RATIO.
+        self._vad_sustain_threshold = round(vad_rms_threshold * VAD_SUSTAIN_RATIO)
         self._vad_hangover_seconds = vad_hangover_seconds
         self._vad_hangover_frames  = max(1, round(vad_hangover_seconds * 1000 / FRAME_MS))
         self._voice_active       = False
@@ -989,8 +1007,9 @@ class RepeaterAudioClient:
 
     def _update_vad(self, pcm_8k_mono: bytes) -> None:
         """
-        Simple energy-threshold VAD with hysteresis, driving two independent
-        callbacks off the same underlying state machine:
+        Energy-threshold VAD with amplitude hysteresis (a full-threshold start
+        gate, a lower VAD_SUSTAIN_RATIO sustain gate) plus a time hangover,
+        driving two independent callbacks off the same underlying state machine:
 
           on_speaking_change(active: bool) — fires immediately on every edge
           (goes True the instant energy crosses threshold, goes False after
@@ -1021,7 +1040,13 @@ class RepeaterAudioClient:
         """
         rms = audioop.rms(pcm_8k_mono, 2)
 
-        if rms >= self._vad_rms_threshold:
+        # Schmitt trigger: the full threshold to START an over, only the lower
+        # sustain floor to KEEP one going — so a quiet talker whose speech sits
+        # near the start threshold isn't chopped into fragments at every
+        # unvoiced consonant or inter-word dip. See VAD_SUSTAIN_RATIO.
+        gate = self._vad_sustain_threshold if self._voice_active else self._vad_rms_threshold
+
+        if rms >= gate:
             self._silence_run = 0
             if not self._voice_active:
                 self._voice_active      = True

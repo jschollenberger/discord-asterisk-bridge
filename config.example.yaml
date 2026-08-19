@@ -207,6 +207,13 @@ activity:
   # the log at DEBUG level while keying up on the repeater, and adjusting
   # until real transmissions are detected without false-triggering on noise.
   # There's no universally-correct default — start here and adjust.
+  #
+  # The gate has hysteresis: this value is the bar to START a transmission,
+  # but once keyed the over is held together down to half this level. That
+  # keeps a QUIET talker (whose speech sits just above the threshold) from
+  # being chopped into one-sentence fragments at every unvoiced consonant or
+  # inter-word dip — so tune this to reliably START on real audio without
+  # false-triggering on noise, and let the sustain floor handle the dips.
   vad_rms_threshold: 400
 
   # How long a pause (word gap, breath, mid-sentence pause) is tolerated
@@ -214,10 +221,11 @@ activity:
   # duration and for driving Discord's speaking indicator. Too short and a
   # single continuous transmission gets split into several separate logged
   # fragments every time the operator pauses to breathe — real speech pauses
-  # regularly exceed short thresholds like 300ms. If you see one
-  # transmission logged as several short ones back-to-back, raise this
-  # further; if transmissions feel slow to end after someone releases PTT,
-  # lower it.
+  # regularly exceed short thresholds like 300ms, and a slow or deliberate
+  # talker can pause 2-3s between sentences. If you see one transmission
+  # logged as several short ones back-to-back, raise this (2.5-3.0 suits a
+  # slow-paced net or a chatty ragchew); if transmissions feel slow to end
+  # after someone releases PTT, lower it.
   vad_hangover_seconds: 1.5
 
   # Attach a WAV recording of each completed transmission to its

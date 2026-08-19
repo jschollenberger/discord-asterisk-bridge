@@ -23,6 +23,11 @@ def _loud(amp: int = 8000) -> bytes:
     return struct.pack("<%dh" % _SAMPLES, *([amp] * _SAMPLES))
 
 
+def _tone(amp: int) -> bytes:
+    """A frame of constant amplitude — RMS equals |amp| for a DC-level frame."""
+    return struct.pack("<%dh" % _SAMPLES, *([amp] * _SAMPLES))
+
+
 _SILENT = bytes(ra.RTP_FRAME_BYTES)   # all-zero samples → RMS 0
 
 
@@ -31,6 +36,7 @@ def _vad_client(threshold=400, hangover_s=0.06, record=False, max_rec_s=300.0):
     c = ra.RepeaterAudioClient.__new__(ra.RepeaterAudioClient)
     c.extension = "50420"
     c._vad_rms_threshold = threshold
+    c._vad_sustain_threshold = round(threshold * ra.VAD_SUSTAIN_RATIO)
     c._vad_hangover_seconds = hangover_s
     c._vad_hangover_frames = max(1, round(hangover_s * 1000 / ra.FRAME_MS))
     c._voice_active = False
@@ -111,6 +117,53 @@ def test_hangover_tolerates_a_word_gap():
     c._update_vad(_loud())             # talking resumes → gap resets
     assert c._voice_active is True and c._silence_run == 0
     assert reported == []              # transmission never ended
+
+
+# ── Amplitude hysteresis (Schmitt trigger) ────────────────────────────────────
+# threshold=400 → sustain=200 (VAD_SUSTAIN_RATIO 0.5). A _tone(300) frame sits
+# between the two: below the start gate, above the sustain floor.
+
+def test_sustain_floor_holds_a_quiet_over_together():
+    """A quiet talker dipping below the START threshold (but above sustain) on
+    every syllable stays a single over — the bug that shredded quiet users."""
+    c = _vad_client(threshold=400, hangover_s=0.06)   # sustain 200, 3 hangover frames
+    reported = []
+    c._on_transmission = lambda d, rec: reported.append(d)
+    c._update_vad(_loud())                     # start the over
+    for _ in range(10):                        # sustained-but-quiet speech, rms 300
+        c._update_vad(_tone(300))
+    assert c._voice_active is True             # never dropped
+    assert c._silence_run == 0                 # each quiet frame reset the run
+    assert reported == []                      # not chopped into fragments
+
+
+def test_quiet_signal_below_start_threshold_never_begins_an_over():
+    """Hysteresis lowers only the SUSTAIN bar, not the START bar: a sub-threshold
+    signal (e.g. receiver hiss) still must not false-trigger a transmission."""
+    spk = []
+    c = _vad_client(threshold=400)             # sustain 200
+    c._on_speaking_change = lambda a: spk.append(a)
+    for _ in range(10):
+        c._update_vad(_tone(300))              # above sustain, below start
+    assert c._voice_active is False            # never started
+    assert spk == []                           # no speaking edge
+
+
+def test_true_silence_below_sustain_still_ends_the_over(monkeypatch):
+    """A genuine end-of-over (energy below the sustain floor) closes out through
+    the hangover exactly as before — hysteresis doesn't strand a finished over."""
+    clock = {"t": 100.0}
+    _fixed_clock(monkeypatch, clock)
+    tx = []
+    c = _vad_client(threshold=400, hangover_s=0.06)   # sustain 200, 3 hangover frames
+    c._on_transmission = lambda d, rec: tx.append(d)
+    c._update_vad(_loud())                     # start at t=100
+    clock["t"] = 101.0
+    c._update_vad(_tone(100))                  # below sustain → silence_run 1
+    c._update_vad(_tone(100))                  # 2
+    assert tx == []                            # still within hangover
+    c._update_vad(_tone(100))                  # 3 == hangover → end
+    assert c._voice_active is False and len(tx) == 1
 
 
 def test_recording_frame_buffer_is_capped():
