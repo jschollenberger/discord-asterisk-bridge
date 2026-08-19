@@ -1775,12 +1775,14 @@ class ControlPanelView(discord.ui.View):
         try:
             if not ix.response.is_done():
                 await ix.response.send_message(
-                    f"❌ Unexpected error in button handler: `{error}`",
+                    "❌ Something went wrong — it's been logged. Try again, "
+                    "or use the 🔄 Reconnect button.",
                     ephemeral=True,
                 )
             else:
                 await ix.followup.send(
-                    f"❌ Unexpected error in button handler: `{error}`",
+                    "❌ Something went wrong — it's been logged. Try again, "
+                    "or use the 🔄 Reconnect button.",
                     ephemeral=True,
                 )
         except Exception:
@@ -2231,19 +2233,58 @@ async def on_guild_join(guild: discord.Guild):
     log.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
 
 
+def _friendly_command_error(error: BaseException) -> Optional[str]:
+    """A user-safe message for a *known* command error, or None when the error
+    is unexpected — in which case the caller logs the traceback and shows a
+    generic message rather than leaking the raw exception (which just reads as a
+    scary internal failure, e.g. 'ClientException: Not connected to voice').
+
+    Unwraps discord.py's invoke/hybrid wrappers so we branch on the real cause.
+    Only messages that describe what the *user* did (bad input, no permission,
+    cooldown, DM-only) are returned — never an internal error string."""
+    for _ in range(3):
+        original = getattr(error, "original", None)
+        if original is None:
+            break
+        error = original
+
+    if isinstance(error, commands.NoPrivateMessage):
+        return "❌ This command only works in a server, not in DMs."
+    if isinstance(error, commands.CommandOnCooldown):
+        return f"⏳ That command is on cooldown — try again in {error.retry_after:.0f}s."
+    if isinstance(error, (commands.MissingPermissions, commands.NotOwner)):
+        return "❌ You don't have permission to use that command."
+    if isinstance(error, commands.CheckFailure):
+        return "❌ You can't use that command here."
+    if isinstance(error, commands.BadArgument):
+        return f"❌ {error}"   # BadArgument messages are written to be shown to users
+    return None
+
+
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    # Nothing actionable to tell the user for these — stay silent.
     if isinstance(error, (commands.CommandNotFound, commands.MissingRequiredArgument)):
         return
-    if isinstance(error, commands.NoPrivateMessage):
+
+    friendly = _friendly_command_error(error)
+    if friendly is not None:
         try:
-            await ctx.send("❌ This command only works in a server, not in DMs.", ephemeral=True)
+            await ctx.send(friendly, ephemeral=True)
         except Exception:
             pass
         return
-    log.error(f"Command error [{ctx.command}]: {error}")
+
+    # Unexpected/internal failure. Log the FULL traceback server-side (this path
+    # used to log without one) and show the user a generic message — never the
+    # raw exception.
+    log.error(f"Unhandled command error in {ctx.command}: {error!r}", exc_info=error)
     try:
-        await ctx.send(f"❌ Something went wrong running that command: `{error}`", ephemeral=True)
+        await ctx.send(
+            "❌ Something went wrong — it's been logged. Try again, and if it "
+            "keeps happening use the panel 🔄 Reconnect button.",
+            ephemeral=True,
+        )
     except Exception:
         pass
 

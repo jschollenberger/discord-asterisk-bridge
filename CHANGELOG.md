@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asyncio printed when discord.py's voice-reconnect task ended on a transient DNS
   error (`getaddrinfo failed` resolving `*.discord.media`). It isn't fatal — the
   watchdog re-establishes voice — so it's demoted to a one-line DEBUG.
+- **Command and panel-button errors no longer surface the raw exception to the
+  user.** An unhandled command error used to show e.g. `Something went wrong
+  running that command: ClientException: Not connected to voice`, and it was
+  logged *without* a traceback. Now known, user-caused errors (missing
+  permission, cooldown, bad input, DM-only) get a friendly one-liner, while any
+  unexpected error shows a generic "it's been logged" message and the **full
+  traceback goes to the server log** for diagnosis. Same treatment for panel
+  button crashes.
 
 ## [1.3.1] — 2026-08-16
 
