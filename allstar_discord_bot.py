@@ -1072,6 +1072,8 @@ _tx_import_warned = False
 _vr_decoder_hardened = False
 _vr_dave_decrypt_enabled = False
 _vr_drop_log_ts: dict[int, float] = {}   # ssrc → last time we logged a drop
+_dave_miss_log_ts: dict[int, float] = {}   # ssrc → last time we logged a DAVE decrypt miss
+_dave_decrypt_confirmed = False            # flips True + logs INFO on the first real E2EE decrypt
 
 
 def _harden_voice_recv_decoder() -> None:
@@ -1138,9 +1140,19 @@ def _dave_decrypt(decoder: Any, packet: Any, davey_mod: Any) -> None:
 
     Guarded no-op unless there is a ready DAVE session on an E2EE call and the
     SSRC is already mapped to a sender (needed to pick the right ratchet).
-    Non-E2EE passthrough frames (silence/keepalives) make decrypt raise and are
-    left unchanged — they decode fine as-is.
+
+    When Discord runs a call's media in the clear (which it does when a
+    non-DAVE participant is present), the frames arrive as plaintext and
+    davey's decrypt raises ``UnencryptedWhenPassthroughDisabled`` — we leave
+    ``decrypted_data`` untouched so it decodes fine as plaintext opus. That
+    miss is logged at DEBUG, throttled to one line per SSRC per 10s, and
+    annotated with davey's per-user decryption stats (``successes`` > 0 means
+    real E2EE frames are decoding; all-``passthrough`` means the media is in
+    the clear — either way TX audio decodes). The first genuine decrypt logs
+    a one-time INFO confirmation, which is the positive signal that inbound
+    DAVE decode is working this run.
     """
+    global _dave_decrypt_confirmed
     data = getattr(packet, "decrypted_data", None)
     if not data:
         return
@@ -1157,13 +1169,38 @@ def _dave_decrypt(decoder: Any, packet: Any, davey_mod: Any) -> None:
         # SSRC not mapped to a sender yet — can't choose a ratchet; leave it.
         return
     try:
-        packet.decrypted_data = session.decrypt(
+        decrypted = session.decrypt(
             int(user_id), davey_mod.MediaType.audio, bytes(data)
         )
     except Exception as exc:
-        # Expected for non-E2EE passthrough frames; the decoder hardening drops
-        # anything genuinely undecodable instead of crashing the receive thread.
-        log.debug(f"TX: DAVE decrypt passthrough/miss for ssrc={decoder.ssrc}: {exc}")
+        # Plaintext frame while the decryptor has passthrough off (see docstring):
+        # leave decrypted_data untouched so it decodes as-is, and log a throttled,
+        # stats-annotated DEBUG line — the decoder hardening still drops anything
+        # genuinely undecodable instead of crashing the receive thread.
+        now = time.time()
+        if now - _dave_miss_log_ts.get(decoder.ssrc, 0.0) >= 10.0:
+            _dave_miss_log_ts[decoder.ssrc] = now
+            detail = ""
+            try:
+                s = session.get_decryption_stats(int(user_id), davey_mod.MediaType.audio)
+                if s is not None:
+                    detail = (
+                        f" [decrypt ok={s.successes} passthrough={s.passthroughs} "
+                        f"fail={s.failures}]"
+                    )
+            except Exception:
+                pass
+            log.debug(
+                f"TX: DAVE decrypt passthrough/miss for ssrc={decoder.ssrc}: {exc}{detail}"
+            )
+        return
+    packet.decrypted_data = decrypted
+    if not _dave_decrypt_confirmed:
+        _dave_decrypt_confirmed = True
+        log.info(
+            "TX: inbound DAVE decrypt confirmed — first E2EE audio frame "
+            "decrypted successfully."
+        )
 
 
 def _enable_dave_receive_decrypt() -> None:

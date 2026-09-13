@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The inbound DAVE (E2EE) decrypt "miss" log is now throttled and carries
+  decryption stats.** When Discord runs a call's media in the clear (a
+  non-DAVE participant is present), every frame arrives as plaintext and
+  davey's decrypt raises `UnencryptedWhenPassthroughDisabled`; the frame still
+  decodes fine, but the DEBUG line was un-throttled and flooded (2,868 lines in
+  one 20-day session, several per second while someone talks). It is now
+  rate-limited to one line per SSRC per 10s — matching the decoder-drop log —
+  and annotated with davey's per-user stats (`ok=` successes / `passthrough=` /
+  `fail=`). The first genuine E2EE decrypt now logs a one-time INFO
+  confirmation, so a live session shows definitively whether inbound TX audio
+  is decrypting via real E2EE or arriving as passthrough plaintext — without
+  needing an authorized operator to key up.
+
 ### Fixed
 - **A quiet talker's single over is no longer chopped into a pile of
   one-sentence recordings.** The RX voice-activity gate was a single energy

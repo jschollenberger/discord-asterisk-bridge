@@ -13,6 +13,7 @@ Discord voice connection required, so they run anywhere CI does.
 from __future__ import annotations
 
 import importlib.util
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -40,7 +41,8 @@ def _make(*, ready=True, version=1, cached_id=4242, cipher=b"CIPHER"):
     return decoder, packet, session, calls
 
 
-def test_decrypts_frame_in_place(bot_module):
+def test_decrypts_frame_in_place(bot_module, monkeypatch):
+    monkeypatch.setattr(bot_module, "_dave_decrypt_confirmed", False)
     decoder, packet, _session, calls = _make()
     bot_module._dave_decrypt(decoder, packet, _FakeDavey)
     assert packet.decrypted_data == b"PLAINopus"
@@ -88,6 +90,64 @@ def test_passthrough_frame_left_unchanged_on_decrypt_error(bot_module):
     session.decrypt = _raise
     bot_module._dave_decrypt(decoder, packet, _FakeDavey)
     assert packet.decrypted_data == b"CIPHER"
+
+
+def test_first_successful_decrypt_logs_confirmation_once(bot_module, monkeypatch, caplog):
+    # A returned value (no exception) is a genuine E2EE decrypt — surface the
+    # first one at INFO, and only the first (idempotent for the rest of the run).
+    monkeypatch.setattr(bot_module, "_dave_decrypt_confirmed", False)
+    decoder, packet, _session, _calls = _make()   # decrypt() returns b"PLAINopus"
+    with caplog.at_level(logging.INFO):
+        bot_module._dave_decrypt(decoder, packet, _FakeDavey)
+    assert bot_module._dave_decrypt_confirmed is True
+    confirms = [r for r in caplog.records if "DAVE decrypt confirmed" in r.getMessage()]
+    assert len(confirms) == 1
+    bot_module._dave_decrypt(decoder, packet, _FakeDavey)   # second success
+    confirms = [r for r in caplog.records if "DAVE decrypt confirmed" in r.getMessage()]
+    assert len(confirms) == 1                                # not re-logged
+
+
+def test_decrypt_miss_is_throttled_and_annotated_with_stats(bot_module, monkeypatch, caplog):
+    # Plaintext frames raise; the miss logs once per SSRC per 10s, carrying
+    # davey's decryption stats so successes>0 (real E2EE) is distinguishable
+    # from all-passthrough (media in the clear).
+    monkeypatch.setattr(bot_module, "_dave_miss_log_ts", {})
+    decoder, packet, session, _calls = _make()
+    stats_calls: list[tuple] = []
+
+    def _raise(uid, media_type, data):
+        raise ValueError("UnencryptedWhenPassthroughDisabled")
+
+    def _stats(uid, media_type):
+        stats_calls.append((uid, media_type))
+        return SimpleNamespace(successes=0, passthroughs=7, failures=2, attempts=9, duration=0)
+
+    session.decrypt = _raise
+    session.get_decryption_stats = _stats
+    with caplog.at_level(logging.DEBUG):
+        bot_module._dave_decrypt(decoder, packet, _FakeDavey)
+        bot_module._dave_decrypt(decoder, packet, _FakeDavey)   # immediate repeat → throttled
+
+    assert packet.decrypted_data == b"CIPHER"                   # frame left unchanged
+    assert len(stats_calls) == 1                                # only the un-throttled first line
+    misses = [r.getMessage() for r in caplog.records if "DAVE decrypt passthrough/miss" in r.getMessage()]
+    assert len(misses) == 1
+    assert "ok=0" in misses[0] and "passthrough=7" in misses[0] and "fail=2" in misses[0]
+
+
+def test_decrypt_miss_without_stats_api_still_logs(bot_module, monkeypatch, caplog):
+    # get_decryption_stats missing/raising must not break the miss log.
+    monkeypatch.setattr(bot_module, "_dave_miss_log_ts", {})
+    decoder, packet, session, _calls = _make()
+
+    def _raise(uid, media_type, data):
+        raise ValueError("UnencryptedWhenPassthroughDisabled")
+
+    session.decrypt = _raise   # session has no get_decryption_stats attribute
+    with caplog.at_level(logging.DEBUG):
+        bot_module._dave_decrypt(decoder, packet, _FakeDavey)
+    assert packet.decrypted_data == b"CIPHER"
+    assert any("DAVE decrypt passthrough/miss" in r.getMessage() for r in caplog.records)
 
 
 def test_enable_respects_idempotency_guard(bot_module, monkeypatch):
