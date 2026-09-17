@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] — 2026-09-17
+
+Log-noise and audio-quality polish from field logs. A quiet operator's single
+transmission is no longer chopped into a pile of one-sentence recordings; the
+voice-channel status line no longer trips Discord's rate limit (or dumps
+tracebacks when it does); and the inbound DAVE (E2EE) decrypt log is throttled
+and now reports, in a live session, whether TX audio is decrypting via real
+E2EE or arriving as passthrough plaintext — no on-air test needed.
+
 ### Changed
 - **The inbound DAVE (E2EE) decrypt "miss" log is now throttled and carries
   decryption stats.** When Discord runs a call's media in the clear (a
@@ -547,7 +556,8 @@ clubs can run it against their own AllStar/HamVOIP nodes.
 - Seed `rfcvoip` SIP Call-ID counters randomly per connection to avoid
   cross-restart identifier collisions (zombie-dialog remote-BYEs).
 
-[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/jschollenberger/discord-asterisk-bridge/compare/v1.2.0...v1.3.0
