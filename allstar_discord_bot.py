@@ -163,8 +163,15 @@ _voice_listeners: dict[tuple[int, int], float] = {}
 # Voice-channel status (the small line under the channel name): channel_id →
 # the status text we last set, so channel_status_task only edits on a change.
 # _channel_status_supported flips False if the bot lacks the permission.
+# _channel_status_edit_ts tracks the last successful edit per channel so we can
+# debounce: Discord's PUT /voice-status endpoint is aggressively rate-limited
+# (429s, and 500s under load), and the live "on the air" bit flips every over,
+# so during an active net a per-change edit trips the limit. We cap edits to
+# one per channel per _STATUS_MIN_EDIT_INTERVAL and let the loop coalesce.
 _channel_status: dict[int, str] = {}
+_channel_status_edit_ts: dict[int, float] = {}
 _channel_status_supported: bool = True
+_STATUS_MIN_EDIT_INTERVAL = 30.0   # seconds between voice-status edits per channel
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Rich Console & Logging
@@ -3704,18 +3711,34 @@ async def channel_status_task():
             client = _monitor_clients.get(gs.preset)
             desired[ch.id] = (ch, _voice_status_text(rpt, client))
 
+    now = time.monotonic()
     for ch_id, (channel, text) in desired.items():
         if _channel_status.get(ch_id) == text:
+            continue
+        # Debounce: Discord rate-limits the voice-status endpoint hard, and the
+        # live "on the air" bit flips every over — so cap edits to one per
+        # channel per _STATUS_MIN_EDIT_INTERVAL and let the next cycle pick up
+        # whatever the status has settled to by then.
+        if now - _channel_status_edit_ts.get(ch_id, 0.0) < _STATUS_MIN_EDIT_INTERVAL:
             continue
         try:
             await channel.edit(status=text)
             _channel_status[ch_id] = text
+            _channel_status_edit_ts[ch_id] = now
         except discord.Forbidden:
             _channel_status_supported = False
             log.warning("Voice channel status disabled — the bot lacks the "
                         "'Set Voice Channel Status' permission. Grant it to show "
                         "live repeater status under the channel name.")
             return
+        except discord.HTTPException as exc:
+            # Expected transient — 429 (rate limited) or a 5xx from the
+            # voice-status endpoint. It's handled (the next cycle retries), so
+            # log a clean line rather than a full traceback, and hold off the
+            # retry for the debounce window so we don't hammer the limit.
+            _channel_status_edit_ts[ch_id] = now
+            log.debug(f"Voice channel status update deferred [{ch_id}]: "
+                      f"HTTP {exc.status} — retrying next cycle")
         except Exception:
             log.debug(f"Voice channel status update failed [{ch_id}]", exc_info=True)
 
@@ -3725,9 +3748,12 @@ async def channel_status_task():
         if isinstance(channel, discord.VoiceChannel):
             try:
                 await channel.edit(status=None)
+            except discord.HTTPException as exc:
+                log.debug(f"Voice channel status clear deferred [{ch_id}]: HTTP {exc.status}")
             except Exception:
                 log.debug(f"Voice channel status clear failed [{ch_id}]", exc_info=True)
         _channel_status.pop(ch_id, None)
+        _channel_status_edit_ts.pop(ch_id, None)
 
 
 @watchdog.before_loop
