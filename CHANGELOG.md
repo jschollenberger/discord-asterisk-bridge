@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needing an authorized operator to key up.
 
 ### Fixed
+- **The voice-channel status updater no longer trips Discord's rate limit or
+  dumps tracebacks when it does.** `channel_status_task` refreshes the status
+  line under the voice channel every 10s whenever it changes — but the live
+  "on the air" bit flips every over, and Discord rate-limits `PUT /voice-status`
+  hard (observed 429s plus 500s under load during a busy net). Edits are now
+  debounced to at most once per channel per 30s (the loop coalesces to whatever
+  the status settled to), and the expected `HTTPException` (429/5xx) is logged
+  as a clean one-line DEBUG note instead of a full traceback. Purely cosmetic
+  before — the errors were already caught and audio was unaffected — but it kept
+  the log clean and stops hammering the endpoint.
 - **A quiet talker's single over is no longer chopped into a pile of
   one-sentence recordings.** The RX voice-activity gate was a single energy
   threshold, so a quiet operator whose speech sat just above it dipped *below*
