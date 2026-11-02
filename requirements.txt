@@ -13,7 +13,7 @@ discord.py[voice]>=2.7.1
 pyyaml>=6.0.3
 
 # Async HTTP — QRZ.com lookups and solar propagation data
-aiohttp>=3.14.3
+aiohttp>=3.14.5
 
 # Beautiful terminal dashboard and logging
 rich>=15.0.0
@@ -29,7 +29,7 @@ rich>=15.0.0
 # and the sipPort/rtpPortLow/rtpPortHigh kwargs. An unreviewed upgrade could
 # silently change these. Bump deliberately: read the diff, re-test startup
 # with two concurrent monitors, then update this pin.
-rfcvoip==2.10.2
+rfcvoip==2.10.3
 
 # Voice RECEIVE for Discord — base discord.py is send-only, this adds the
 # ability to capture Discord users' mic audio (needed for TX: Discord → repeater).
